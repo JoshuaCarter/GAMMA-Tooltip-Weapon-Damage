@@ -1,6 +1,6 @@
 # GAMMA Damage Stats
 
-Adds weapon damage information to weapon tooltips in **S.T.A.L.K.E.R. G.A.M.M.A.**
+Adds weapon damage information to weapon tooltips (and description box) in **S.T.A.L.K.E.R. G.A.M.M.A.**
 
 ## What it does
 

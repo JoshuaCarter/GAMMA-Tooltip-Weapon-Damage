@@ -1,9 +1,9 @@
 --[[
 	Dorn's Weapon Tooltip
 
-	Adds a per-ammo damage breakdown to weapon inventory tooltips (no LTX edits,
-	all values read live). Renders below the flavor description via
-	ui_dorn_weapon_tooltip.xml: the entire layout AND all static text live in the
+	Adds a per-ammo damage breakdown to weapon inventory tooltips and the
+	weapon details popup (no LTX edits, all values read live). Renders below
+	the flavor description via ui_dorn_weapon_tooltip.xml: the entire layout AND all static text live in the
 	XML; the script only fills the dynamic number cells (each number is its own
 	cell) and shows/hides rows. No icons - the type label carries the color.
 
@@ -223,6 +223,9 @@ end
 local CLR = {
 	white = GetARGB(255, 255, 255, 255),
 	value = GetARGB(255, 175, 175, 175),
+	-- Match utils_ui clr_list p1/n1 (stock stat value colors).
+	stat_pos = GetARGB(255, 170, 170, 170),
+	stat_neg = GetARGB(255, 200, 50, 50),
 }
 
 -- Caps of the damage/hit-power row we inject (both MCM modes). The engine paints
@@ -271,6 +274,12 @@ local ROW_XML = {
 -- Parsed once; layout lives in configs/ui/ui_dorn_weapon_tooltip.xml.
 local DAMAGE_XML = CScriptXmlInit()
 DAMAGE_XML:ParseFile("ui_dorn_weapon_tooltip.xml")
+
+-- Own handle for the vanilla stat-box layout (item_info:stats_box lives in
+-- utils.xml, same file utils_ui.get_stats_xml uses). Used to rebuild our
+-- damage/hit-power stat row in the details sheet with white text.
+local STAT_XML = CScriptXmlInit()
+STAT_XML:ParseFile("utils.xml")
 
 local base_uiinfo_init
 local base_uiinfo_update
@@ -788,12 +797,12 @@ local function read_layout_metrics(fields)
 	}
 end
 
-local function init_damage_panel(self)
+local function create_damage_fields(parent)
 	local ok, dlg = pcall(function()
-		return DAMAGE_XML:InitStatic("panel", self.dialog)
+		return DAMAGE_XML:InitStatic("panel", parent)
 	end)
 	if not ok or not dlg then
-		return
+		return nil, nil
 	end
 
 	local header = DAMAGE_XML:InitStatic("panel:header", dlg)
@@ -816,6 +825,7 @@ local function init_damage_panel(self)
 	end
 
 	local fields = {
+		dlg = dlg,
 		header = header,
 		col_hdr_2 = col_hdr_2,
 		grp_torso = grp_torso,
@@ -833,20 +843,18 @@ local function init_damage_panel(self)
 	fields.layout = read_layout_metrics(fields)
 	apply_column_headers(fields)
 
-	self.dorn_wpn_damage = dlg
-	self.dorn_wpn_fields = fields
-	dlg:Show(false)
+	return dlg, fields
 end
 
-local function populate_damage_panel(info, data)
-	local fields = info.dorn_wpn_fields
-	if not info.dorn_wpn_damage or not fields or not data then
-		return
+-- panel_width: optional fixed width (details scroll); default uses parent/desc width.
+local function populate_damage_fields(fields, data, panel_width)
+	if not fields or not fields.dlg or not data then
+		return false
 	end
 
 	local layout = fields.layout
 	if not layout then
-		return
+		return false
 	end
 
 	apply_column_headers(fields)
@@ -879,14 +887,77 @@ local function populate_damage_panel(info, data)
 	end
 
 	if not any_row then
-		info.dorn_wpn_damage:Show(false)
+		fields.dlg:Show(false)
+		return false
+	end
+
+	local w = panel_width or fields.dlg:GetWidth()
+	local panel_h = last_row_y + layout.row_h
+	fields.dlg:SetWndSize(vector2():set(w, panel_h))
+	fields.dlg:Show(true)
+	return true
+end
+
+local DETAILS_PANEL_WIDTH = 500
+
+local function add_details_damage_section(sheet, obj)
+	if not CONFIG.show_damage_table or not sheet or not sheet.scroll or not sheet.xml then
 		return
 	end
 
-	local w = info.desc:GetWidth()
-	local panel_h = last_row_y + layout.row_h
-	info.dorn_wpn_damage:SetWndSize(vector2():set(w, panel_h))
-	info.dorn_wpn_damage:Show(true)
+	local sec = ini_sys:r_string_ex(obj:section(), "parent_section") or obj:section()
+	if not IsWeapon(obj) or IsItem("fake_ammo_wpn", sec) then
+		return
+	end
+
+	local damage_data = build_ammo_damage_rows(obj, sec)
+	if not damage_data then
+		return
+	end
+
+	local xml = sheet.xml
+	local _st = xml:InitStatic("itm_details:form", nil)
+	local dlg, fields = create_damage_fields(_st)
+	if not dlg or not populate_damage_fields(fields, damage_data, DETAILS_PANEL_WIDTH) then
+		return
+	end
+
+	utils_xml.sync_size(dlg, _st, 0, 0)
+	sheet.scroll:AddWindow(_st, true)
+	_st:SetAutoDelete(true)
+end
+
+local function weapon_wants_details_damage(obj)
+	if not obj or not CONFIG.show_damage_table then
+		return false
+	end
+
+	local sec = ini_sys:r_string_ex(obj:section(), "parent_section") or obj:section()
+	return IsWeapon(obj) and not IsItem("fake_ammo_wpn", sec)
+end
+
+local function init_damage_panel(self)
+	local dlg, fields = create_damage_fields(self.dialog)
+	if not dlg then
+		return
+	end
+
+	self.dorn_wpn_damage = dlg
+	self.dorn_wpn_fields = fields
+	dlg:Show(false)
+end
+
+local function populate_damage_panel(info, data)
+	local fields = info.dorn_wpn_fields
+	if not info.dorn_wpn_damage or not fields or not data then
+		return
+	end
+
+	local w = info.desc and info.desc:GetWidth()
+	if not populate_damage_fields(fields, data, w) then
+		info.dorn_wpn_damage:Show(false)
+		return
+	end
 end
 
 -- Reposition replacement-parts block (Parts in Tooltip mod) after we shift stats/ammo.
@@ -976,26 +1047,83 @@ local function refresh_weapon_damage_panel(info, obj, sec)
 	sync_damage_layout(info)
 end
 
+-- The details/workshop sheets build stats via utils_ui.get_stats_xml, which
+-- paints the value grey (clr_list p1) and never exposes the created text window
+-- for later recolor (unlike the hover tooltip's reused stat boxes). So for our
+-- two stat rows we rebuild the box ourselves with white text; everything else
+-- falls through to the stock implementation.
+local base_get_stats_xml
+
+local function build_white_stat_xml(handler, obj, sec, gr, stat)
+	local value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
+	if not value then
+		return
+	end
+
+	local st = STAT_XML:InitStatic("item_info:stats_box", handler)
+
+	local st_icon = STAT_XML:InitStatic("item_info:stats_box:icon", st)
+	st_icon:InitTexture(gr.icon_p)
+
+	-- Only the label is whitened; the value keeps the stock grey/red like every
+	-- other stat on the sheet.
+	local st_cap = STAT_XML:InitTextWnd("item_info:stats_box:cap", st)
+	st_cap:SetText(game.translate_string(gr.name))
+	st_cap:SetTextColor(CLR.white)
+
+	local st_txt = STAT_XML:InitTextWnd("item_info:stats_box:prog_txt", st)
+	st_txt:SetText(value)
+	st_txt:SetTextColor(nclr and CLR.stat_neg or CLR.stat_pos)
+
+	st:SetAutoDelete(true)
+	return st
+end
+
+local function get_stats_xml_hook(handler, obj, sec, gr, stat)
+	local grp = gr
+	if type(grp) == "string" then
+		grp = utils_ui.stats_table and utils_ui.stats_table[grp]
+	end
+
+	if grp and not grp.track and grp.name and CONFIG.damage_stat ~= "off" then
+		local labels = whiten_stat_labels()
+		if labels[game.translate_string(grp.name)] then
+			local ok, st = pcall(build_white_stat_xml, handler, obj, sec, grp, stat)
+			if ok and st then
+				return st
+			end
+		end
+	end
+
+	return base_get_stats_xml(handler, obj, sec, gr, stat)
+end
+
 local base_itm_details_reset
+local base_itm_details_addtext
+
+local function itm_details_addtext_hook(self, xml, path, offset, txt)
+	local ele = base_itm_details_addtext(self, xml, path, offset, txt)
+
+	-- Vanilla adds the item description as the first text_s_l row (after weight).
+	if self.dorn_details_pending and path == "text_s_l" then
+		local obj = self.dorn_details_pending
+		self.dorn_details_pending = nil
+		add_details_damage_section(self, obj)
+	end
+
+	return ele
+end
 
 local function itm_details_reset_hook(self, obj)
+	if weapon_wants_details_damage(obj) then
+		self.dorn_details_pending = obj
+	end
+
 	if base_itm_details_reset then
 		base_itm_details_reset(self, obj)
 	end
 
-	if not obj or not self.item_info then
-		return
-	end
-
-	local info = self.item_info
-	if not info.dorn_wpn_damage then
-		init_damage_panel(info)
-	end
-
-	-- Details sheet reuses item_info; force a full refresh for the new context.
-	info.id = nil
-	info.section = nil
-	info:Update(obj, nil, {})
+	self.dorn_details_pending = nil
 end
 
 local function install_details_hook()
@@ -1006,6 +1134,16 @@ local function install_details_hook()
 	if not base_itm_details_reset then
 		base_itm_details_reset = ui_itm_details.UIItemSheet.Reset
 		ui_itm_details.UIItemSheet.Reset = itm_details_reset_hook
+	end
+
+	if not base_itm_details_addtext then
+		base_itm_details_addtext = ui_itm_details.UIItemSheet.AddText
+		ui_itm_details.UIItemSheet.AddText = itm_details_addtext_hook
+	end
+
+	if not base_get_stats_xml and utils_ui.get_stats_xml then
+		base_get_stats_xml = utils_ui.get_stats_xml
+		utils_ui.get_stats_xml = get_stats_xml_hook
 	end
 end
 
