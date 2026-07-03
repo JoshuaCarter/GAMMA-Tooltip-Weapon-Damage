@@ -1,4 +1,4 @@
-# GAMMA Damage Stats
+# GAMMA Tooltip Weapon Damage
 
 Adds weapon damage information to weapon tooltips (and description box) in **S.T.A.L.K.E.R. G.A.M.M.A.**
 
@@ -26,10 +26,10 @@ All under **Dorn's Weapon Tooltip** in MCM. Info tab explains the columns if you
 
 ## Installation
 
-1. Download the latest release from https://github.com/JoshuaCarter/GAMMA-Damage-Stats/releases
+1. Download the latest release from https://github.com/JoshuaCarter/GAMMA-Tooltip-Weapon-Damage/releases
 2. Install via MO2 like normal
 3. Load **after** G.A.M.M.A. Accurate Defense Values (or anything that messes with weapon tooltips)
 
-## Installation
+## Notes
 
 - Consider this a work-in-progress as I can't be 100% sure I've gotten the calculations correct, or that all weapons/ammo are working correctly yet.
