@@ -259,11 +259,9 @@ local function apply_custom_stat_display(info, obj, sec)
 				ele.cap:SetTextColor(CLR.white)
 				if CONFIG.damage_stat == "damage" and slash then
 					ele.txt:SetText(slash)
-					ele.txt:SetTextColor(CLR.stat_pos)
 					ele.txt:Show(true)
-				else
-					ele.txt:SetTextColor(CLR.white)
 				end
+				ele.txt:SetTextColor(CLR.white)
 			end
 		end
 	end
@@ -825,12 +823,17 @@ local function read_layout_metrics(fields)
 	}
 end
 
-local function create_damage_fields(parent)
+local function create_damage_fields(parent, panel_x)
 	local ok, dlg = pcall(function()
 		return DAMAGE_XML:InitStatic("panel", parent)
 	end)
 	if not ok or not dlg then
 		return nil, nil
+	end
+
+	if panel_x ~= nil then
+		local pos = dlg:GetWndPos()
+		dlg:SetWndPos(vector2():set(panel_x, pos.y))
 	end
 
 	local header = DAMAGE_XML:InitStatic("panel:header", dlg)
@@ -945,7 +948,7 @@ local function add_details_damage_section(sheet, obj)
 
 	local xml = sheet.xml
 	local _st = xml:InitStatic("itm_details:form", nil)
-	local dlg, fields = create_damage_fields(_st)
+	local dlg, fields = create_damage_fields(_st, 3)
 	if not dlg or not populate_damage_fields(fields, damage_data, DETAILS_PANEL_WIDTH) then
 		return
 	end
