@@ -14,7 +14,7 @@
 		<text>Weapon tooltips now show a DAMAGE panel below the description, the columns are:\n\n- Type: Shows an ammo type available to this weapon.\n- AP: Shows the AP value of the ammo.\n- vs Torso (BRC): Show how much damage this weapon + ammo will do to an NPC with an armor value equivalent to the shown BRC value.\n- vs Head (BRC): Same but vs the head.\n\nDamage numbers are colored grey to green according to how well they penetrate that BRC value.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_info_damage_stat">
-		<text>The optional weapon damage stat row (Main settings) can show:\n\n- Hit Power: weapon hit_power as %, no ammo modifier (x pellets for shotguns)\n- Damage (Dmg): legacy normalized damage bar value, best ammo\n- Damage (ammo): same legacy Dmg formula per ammo type, AP-desc order, e.g. 72/58/41/33\n\nDegraded ammo is ignored for the damage stat rows.</text>
+		<text>The optional weapon damage stat row (Main settings) can show:\n\n- Hit Power: weapon hit_power as %, no ammo modifier (x pellets for shotguns)\n- Damage Per Ammo: max damage (no armor) per ammo type using the same calc as the table, in the table's ammo order, e.g. 45/38/22/18\n\nDegraded ammo is ignored for the damage stat rows.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_info_armor_columns">
 		<text>Under the hood, every damage value uses hidden NPC bone-armor values (spine for torso, head bone for headshots), not the BRC values you see on armor. The BRC values are used to make things easier to understand. You can swap to NPC armor % values if you prefer.</text>
@@ -35,7 +35,7 @@
 		<text>Hit Power</text>
 	</string>
 	<string id="ui_dorn_wpn_ammo_torso">
-		<text>Damage (ammo)</text>
+		<text>Damage Per Ammo</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_show_damage_table">
 		<text>Show damage table</text>
@@ -46,14 +46,11 @@
 	<string id="dorn_weapon_tooltip_main_damage_stat_lst_off">
 		<text>Off</text>
 	</string>
-	<string id="dorn_weapon_tooltip_main_damage_stat_lst_damage">
-		<text>Damage (Dmg)</text>
-	</string>
 	<string id="dorn_weapon_tooltip_main_damage_stat_lst_hit_power">
 		<text>Hit Power</text>
 	</string>
-	<string id="dorn_weapon_tooltip_main_damage_stat_lst_ammo_torso">
-		<text>Damage (ammo)</text>
+	<string id="dorn_weapon_tooltip_main_damage_stat_lst_damage">
+		<text>Damage Per Ammo</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_brc">
 		<text>Player BRC (tier)</text>
