@@ -64,10 +64,11 @@ local BUCK_SELF = "ammo_12x70_buck_self"
 
 -- k_ap is the raw armor-piercing coefficient. The ammo's own info card scales it
 -- x1000 (k_ap 0.01 -> "10"), so we match that here.
--- Displayed AP = k_ap * AP_SCALE; color scale matches typical ammo card range.
+-- Displayed AP = k_ap * AP_SCALE. Color scale tops out at the display AP needed
+-- to penetrate the hardest NPC armor tier (see ap_pen_display_max).
 local AP_SCALE = 1000
 local AP_COLOR_LO = 1
-local AP_COLOR_HI = 100
+local AP_COLOR_REF_AIR = 0.05
 local REF_DIST_M = 20
 
 -- Six tiers from actor_armor_class0..5 (NPC bone armor + ap_scale) with matched
@@ -117,10 +118,10 @@ local function lerp(a, b, t)
 	return a + (b - a) * t
 end
 
--- Damage cells fade grey (least damage) to green (most damage). Scaled across a
--- shared min..max so identical numbers always read as the same color and more
--- penetration is always brighter. Torso and head use separate shared scales
--- (headshots hit ~4x harder, so a common scale would leave torso cells dim).
+-- Damage cells fade grey (least damage) to green (most damage). Scaled 1..max
+-- across all rows in a section (torso or head) so identical numbers always
+-- share the same color and higher damage is always brighter than lower.
+-- Head uses its own max (headshots hit much harder than torso).
 -- gamma < 1 brightens the mid-range so the ramp reads as a smooth gradient.
 local DMG_COLOR_GAMMA = 0.75
 local DMG_CLR_MIN = { 135, 135, 135 }
@@ -137,14 +138,6 @@ end
 
 local function format_npc_armor_pct(armor)
 	return tostring(math.floor(armor * 100 + 0.5))
-end
-
-local function ap_display_color(ap)
-	local t = clamp((ap - AP_COLOR_LO) / (AP_COLOR_HI - AP_COLOR_LO), 0, 1)
-	return GetARGB(255,
-		math.floor(lerp(175, 255, t)),
-		math.floor(lerp(175, 224, t)),
-		math.floor(lerp(175, 64, t)))
 end
 
 local function tier_pen_armor(tier, headshot)
@@ -485,6 +478,42 @@ local function dist_atten(air_res, dist)
 	return 1 + dist / 200 * (air_res * 0.5 / (1 - air_res + 0.1))
 end
 
+-- Display AP at which combat_ap first penetrates the hardest BRC tier (torso or
+-- head), using the same formula as effective_dmg at REF_DIST_M.
+local function ap_pen_display_max(diff_mult)
+	local dist_mult = dist_atten(AP_COLOR_REF_AIR, REF_DIST_M)
+	local pen_scale = 10 * diff_mult * AP_COMBAT_TAIL
+	local hi = AP_COLOR_LO
+
+	for _, tier in ipairs(BRC_TIERS) do
+		local k_torso = tier.torso * dist_mult / (pen_scale * tier.torso_ap)
+		local display_torso = k_torso * AP_SCALE
+		if display_torso > hi then
+			hi = display_torso
+		end
+
+		local head_req = tier.head * dist_mult / (tier.head_ap * diff_mult * AP_COMBAT_TAIL)
+		local k_head = (head_req - HEAD_AP_BOOST) / 10
+		if k_head > 0 then
+			local display_head = k_head * AP_SCALE
+			if display_head > hi then
+				hi = display_head
+			end
+		end
+	end
+
+	return math.max(math.ceil(hi), AP_COLOR_LO + 1)
+end
+
+local function ap_display_color(ap)
+	local hi = ap_pen_display_max(get_difficulty_mult())
+	local t = clamp((ap - AP_COLOR_LO) / (hi - AP_COLOR_LO), 0, 1)
+	return GetARGB(255,
+		math.floor(lerp(175, 255, t)),
+		math.floor(lerp(175, 255, t)),
+		math.floor(lerp(175, 0, t)))
+end
+
 local function combat_ap(k_ap_ltx, air_res, dist, ap_scale, diff_mult, headshot)
 	local k_ap = k_ap_ltx * 10
 	if headshot then
@@ -525,36 +554,20 @@ local function fmt_tier_cells(vals)
 	return out
 end
 
--- Min/max damage across a section's tiers, used to scale the grey->green ramp.
-local function cells_range(cells)
-	local lo, hi = math.huge, -math.huge
-	for i = 1, NUM_TIERS do
-		local c = cells[i]
-		if c then
-			if c.dmg < lo then lo = c.dmg end
-			if c.dmg > hi then hi = c.dmg end
+-- Highest damage in a table section across every ammo row (torso or head).
+local function section_dmg_max(rows, section)
+	local hi = 1
+	local i0 = (section == "head") and HEAD_TIER_START or 1
+	for _, row in ipairs(rows) do
+		local cells = section == "torso" and row.torso or row.head
+		for i = i0, NUM_TIERS do
+			local c = cells[i]
+			if c and c.dmg > hi then
+				hi = c.dmg
+			end
 		end
 	end
-	if lo == math.huge then
-		return 1, 1
-	end
-	return lo, hi
-end
-
--- Head display skips tier 1 (brc_head 0); color scale uses visible columns only.
-local function cells_range_head(cells)
-	local lo, hi = math.huge, -math.huge
-	for i = HEAD_TIER_START, NUM_TIERS do
-		local c = cells[i]
-		if c then
-			if c.dmg < lo then lo = c.dmg end
-			if c.dmg > hi then hi = c.dmg end
-		end
-	end
-	if lo == math.huge then
-		return 1, 1
-	end
-	return lo, hi
+	return hi
 end
 
 local function calc_tier_damages(hit_power, k_hit, k_ap_ltx, air_res, headshot, dist, diff_mult, pellet_mult)
@@ -666,25 +679,22 @@ local function build_ammo_damage_rows(obj, sec)
 		return nil
 	end
 
-	-- Per-row color scales: each round's torso cells are ramped against that
-	-- round's own torso min/max, head cells against its own head min/max. This
-	-- makes the no-armor column the brightest for every round (100% of its punch
-	-- getting through) and dims cells as armor cuts into that round's damage.
+	-- Shared color scale per section: 1 (grey) .. max damage (bright green).
+	local torso_hi = section_dmg_max(rows, "torso")
+	local head_hi = section_dmg_max(rows, "head")
 	local ordered = {}
 
 	for _, row in ipairs(rows) do
-		local tl, th = cells_range(row.torso)
-		local hl, hh = cells_range_head(row.head)
 		ordered[#ordered + 1] = {
 			type = row.label,
 			ap = tostring(row.ap),
 			ap_val = row.ap,
 			torso = row.torso,
 			head = row.head,
-			torso_lo = tl,
-			torso_hi = th,
-			head_lo = hl,
-			head_hi = hh,
+			torso_lo = 1,
+			torso_hi = torso_hi,
+			head_lo = 1,
+			head_hi = head_hi,
 		}
 	end
 
