@@ -175,10 +175,17 @@ local function clean_ammo_name(name)
 	return table.concat(kept, " ")
 end
 
+-- Capitalizes the first letter of every word, leaving already-uppercase
+-- letters (e.g. "AP", "FMJ") untouched. Turns stray lowercase source text
+-- like "20x70 shot" into "20x70 Shot".
+local function capitalize_words(str)
+	return (str:gsub("%f[%a]%l", string.upper))
+end
+
 local function ammo_display_label(sec)
 	local override = AMMO_LABEL_OVERRIDE[sec]
 	if override then
-		return override
+		return capitalize_words(override)
 	end
 
 	local name_id = ini_sys:r_string_ex(sec, "inv_name_short")
@@ -203,7 +210,7 @@ local function ammo_display_label(sec)
 	if cleaned == "" then
 		return "?"
 	end
-	return cleaned
+	return capitalize_words(cleaned)
 end
 
 local CLR = {
@@ -439,19 +446,6 @@ function scale_hit_power_display(obj, sec, base_file, base_func, param)
 	return math.floor(base * DAMAGE_SCALE)
 end
 
-local function max_pellets(ammo_list)
-	local max = 0
-	for _, ammo_sec in pairs(ammo_list) do
-		if ammo_sec ~= BUCK_SELF then
-			local pellets = ini_sys:r_float_ex(ammo_sec, "buck_shot") or 0
-			if pellets > max then
-				max = pellets
-			end
-		end
-	end
-	return max
-end
-
 local function get_difficulty_mult()
 	local diff = 3
 	if alife_storage_manager and alife_storage_manager.get_state then
@@ -597,6 +591,12 @@ local function collect_sorted_ammo_rounds(obj, sec, max_count)
 			local k_hit = ini_sys:r_float_ex(ammo_sec, "k_hit") or 1
 			local k_ap = ini_sys:r_float_ex(ammo_sec, "k_ap") or 0
 			local air_res = ini_sys:r_float_ex(ammo_sec, "k_air_resistance") or 0.05
+			-- Pellet count is per-round: a weapon's ammo_class can mix slugs
+			-- (1 projectile) with buckshot (many), so each row must use its
+			-- own round's pellet count, not the highest one seen across the
+			-- whole ammo_class.
+			local pellets = ini_sys:r_float_ex(ammo_sec, "buck_shot") or 0
+			pellets = (pellets > 1) and pellets or 1
 
 			rounds[#rounds + 1] = {
 				sec = ammo_sec,
@@ -604,6 +604,7 @@ local function collect_sorted_ammo_rounds(obj, sec, max_count)
 				k_hit = k_hit,
 				k_ap = k_ap,
 				air_res = air_res,
+				pellets = pellets,
 				ap = math.floor(k_ap * AP_SCALE + 0.5),
 			}
 		end
@@ -642,19 +643,17 @@ local function build_ammo_damage_rows(obj, sec)
 		return nil
 	end
 
-	local pellets = max_pellets(utils_item.get_ammo(sec, obj and obj:id() or nil))
-	local pellet_mult = (pellets > 1) and pellets or 1
 	local diff_mult = get_difficulty_mult()
 
 	local rows = {}
 	for _, r in ipairs(rounds) do
 		local torso = fmt_tier_cells(calc_tier_damages(
 			hit_power, r.k_hit, r.k_ap, r.air_res,
-			false, REF_DIST_M, diff_mult, pellet_mult
+			false, REF_DIST_M, diff_mult, r.pellets
 		))
 		local head = fmt_tier_cells(calc_tier_damages(
 			hit_power, r.k_hit, r.k_ap, r.air_res,
-			true, REF_DIST_M, diff_mult, pellet_mult
+			true, REF_DIST_M, diff_mult, r.pellets
 		))
 		rows[#rows + 1] = {
 			label = r.label,
