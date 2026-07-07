@@ -50,12 +50,6 @@ local CONFIG = {
 	damage_stat = "hit_power",
 	column_headers = "brc",
 	debug_log = false,
-	debug_overlay = false,
-}
-
-local LOG = {
-	LIFECYCLE = { order = 0, color = "gray" },
-	TOOLTIP   = { order = 1, color = "cyan" },
 }
 
 -- Hit Power is weapon hit_power x 100 (per pellet, same as other guns), no ammo k_hit.
@@ -332,13 +326,9 @@ DAMAGE_STAT_BY_MODE = {
 	damage = AMMO_TORSO_STAT,
 }
 
-local function log(log_type, msg)
+local function log(msg)
 	if not (DORN and DORN.dbg) then
 		return
-	end
-	local slot = log_type or LOG.TOOLTIP
-	if CONFIG.debug_overlay then
-		DORN.dbg.overlay(MOD_ID, slot.order, "[WeaponTooltip] " .. tostring(msg), slot.color)
 	end
 	if CONFIG.debug_log then
 		DORN.dbg.log(MOD_ID, tostring(msg))
@@ -406,17 +396,12 @@ local function on_option_change()
 			CONFIG.column_headers = "brc"
 		end
 		CONFIG.debug_log = DORN.mcm.bool(MOD_ID, "development/debug_log", false)
-		CONFIG.debug_overlay = DORN.mcm.bool(MOD_ID, "development/debug_overlay", false)
-	end
-
-	if DORN and DORN.dbg then
-		DORN.dbg.set_enabled(MOD_ID, CONFIG.debug_overlay)
 	end
 
 	apply_damage_stat()
 	invalidate_tooltip_cache()
 
-	log(LOG.LIFECYCLE, string.format("show_damage_table=%s, damage_stat=%s, column_headers=%s",
+	log(string.format("show_damage_table=%s, damage_stat=%s, column_headers=%s",
 		tostring(CONFIG.show_damage_table), tostring(CONFIG.damage_stat), tostring(CONFIG.column_headers)))
 end
 
@@ -694,7 +679,7 @@ local function build_ammo_damage_rows(obj, sec)
 		}
 	end
 
-	log(LOG.TOOLTIP, string.format("%s: hit_power=%.3f, %d rounds", sec, hit_power, #rows))
+	log(string.format("%s: hit_power=%.3f, %d rounds", sec, hit_power, #rows))
 	return {
 		rows = ordered,
 	}
@@ -1247,5 +1232,5 @@ function on_game_start()
 
 	RegisterScriptCallback("on_console_execute", on_console_execute)
 	RegisterScriptCallback("on_option_change", on_option_change)
-	log(LOG.LIFECYCLE, "loaded")
+	log("loaded")
 end
