@@ -1,4 +1,4 @@
-# GAMMA Tooltip Weapon Damage
+# GAMMA Tooltip Weapon Damage v0.1.8
 
 Adds weapon damage information to weapon tooltips (and description box) in **S.T.A.L.K.E.R. G.A.M.M.A.**
 
@@ -33,3 +33,14 @@ All under **Dorn's Weapon Tooltip** in MCM. Info tab explains the columns if you
 ## Notes
 
 - Consider this a work-in-progress as I can't be 100% sure I've gotten the calculations correct, or that all weapons/ammo are working correctly yet.
+
+## Other mods
+
+- https://github.com/JoshuaCarter/GAMMA-Dont-ReEquip-PDA
+- https://github.com/JoshuaCarter/GAMMA-Faster-Skinning
+- https://github.com/JoshuaCarter/GAMMA-Field-Strip-All-Keybind
+- https://github.com/JoshuaCarter/GAMMA-FPS-Counter
+- https://github.com/JoshuaCarter/GAMMA-Giant-Jump
+- https://github.com/JoshuaCarter/GAMMA-Optimal-Tool-Use
+- https://github.com/JoshuaCarter/GAMMA-Prone-Fix
+- https://github.com/JoshuaCarter/GAMMA-Radiation-Grain-Fix
