@@ -5,3 +5,6 @@ Desktop.ini
 *~
 *.log
 temp.html
+
+# ALAO (improve skill)
+*.script.alao-bak
