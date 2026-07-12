@@ -1,4 +1,14 @@
+-- dorn_mcm_banner:begin (managed by sync-dorn-common.sh)
+local DORN_COMMON_VERSION = "dorn_common_02fd8ab5"
+local function dorn_mcm()
+	local hash = DORN_COMMON_VERSION:match("dorn_common_(.+)$")
+	return _G["dorn_mcm_" .. hash]
+end
+-- dorn_mcm_banner:end
+
+
 function on_mcm_load()
+	local MCM = dorn_mcm()
 	return {
 		id = "dorn_weapon_tooltip",
 		text = "ui_mcm_menu_dorn_weapon_tooltip",
@@ -7,7 +17,7 @@ function on_mcm_load()
 				id = "main",
 				sh = true,
 				text = "ui_mcm_dorn_weapon_tooltip_main_section",
-				gr = {
+				gr = MCM.with_header({
 					{
 						id = "show_damage_table",
 						type = "check",
@@ -44,7 +54,7 @@ function on_mcm_load()
 				id = "info",
 				sh = true,
 				text = "ui_mcm_dorn_weapon_tooltip_info_section",
-				gr = {
+				gr = MCM.with_header({
 					{
 						id = "overview",
 						type = "desc",
@@ -81,7 +91,7 @@ function on_mcm_load()
 				id = "development",
 				sh = true,
 				text = "ui_mcm_dorn_weapon_tooltip_development_section",
-				gr = {
+				gr = MCM.with_header({
 					{
 						id = "debug_log",
 						type = "check",
