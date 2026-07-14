@@ -30,14 +30,10 @@
 
 	Two optional MCM settings:
 
-	1. damage_stat - re-enables the built-in damage stat slot that G.A.M.M.A.
-	   Accurate Defense Values comments out of ish_item_stats.script. Defaults
-	   to Hit Power (weapon hit_power as %); also Damage Per Ammo, or Off.
+	1. show_damage_table - per-ammo DAMAGE panel below the description (on by default).
 
-	2. column_headers - show GAMMA BRC tier (10-60) or NPC bone armor % in headers
-	   (labels only; each tier's damage uses its actor_armor_class NPC profile).
-
-	3. show_damage_table - per-ammo DAMAGE panel below the description (on by default).
+	2. show_enhanced_weapon_stats - Hit Power + raw Damage Per Ammo stat rows and
+	   real-value appends on Accuracy/Handling/Reliability/Recoil/Muzzle Velocity.
 ]]
 
 local MOD_ID = "dorn_weapon_tooltip"
@@ -47,7 +43,7 @@ local DORN
 
 local CONFIG = {
 	show_damage_table = true,
-	damage_stat = "hit_power",
+	show_enhanced_weapon_stats = true,
 	column_headers = "brc",
 	debug_log = false,
 }
@@ -204,45 +200,44 @@ local CLR = {
 	stat_neg = GetARGB(255, 200, 50, 50),
 }
 
--- Forward-declared here so the display helpers below (defined before the stat
--- definitions / builder further down) capture these locals as upvalues instead
--- of nil globals.
-local DAMAGE_STAT_BY_MODE
-local format_ammo_torso_damage_slash
+-- Forward-declared here so the display helpers below capture these as upvalues.
+local format_raw_ammo_damage_slash
 
--- Caps of the optional damage stat row we inject. The engine paints stat values
--- grey (clr_list p1); we recolor the label white after every tooltip update.
-local function active_damage_stat_label()
-	if CONFIG.damage_stat == "off" then
-		return nil
-	end
-	local gr = DAMAGE_STAT_BY_MODE[CONFIG.damage_stat]
-	if gr and gr.name then
-		return game.translate_string(gr.name)
-	end
+local ENHANCED_STAT_LABELS = {}
+
+local function refresh_enhanced_stat_labels()
+	ENHANCED_STAT_LABELS = {
+		hit_power = game.translate_string("ui_dorn_wpn_hit_power"),
+		ammo_damage = game.translate_string("ui_dorn_wpn_ammo_torso"),
+	}
 end
 
 local function apply_custom_stat_display(info, obj, sec)
-	if not info or not info.stats or CONFIG.damage_stat == "off" then
+	if not info or not info.stats or not CONFIG.show_enhanced_weapon_stats then
 		return
 	end
 
-	local active_label = active_damage_stat_label()
-	local slash = (CONFIG.damage_stat == "damage" and obj and sec)
-		and format_ammo_torso_damage_slash(obj, sec)
+	local raw_slash = (obj and sec) and format_raw_ammo_damage_slash(obj, sec)
 
 	for _, ele in pairs(info.stats) do
 		if ele.cap and ele.txt then
 			local cap = ele.cap:GetText()
-			if cap and active_label and cap == active_label then
-				ele.cap:SetTextColor(CLR.white)
-				if CONFIG.damage_stat == "damage" and slash then
-					ele.txt:SetText(slash)
+			if cap then
+				if cap == ENHANCED_STAT_LABELS.hit_power then
+					ele.cap:SetTextColor(CLR.white)
+					ele.txt:SetTextColor(CLR.white)
+				elseif cap == ENHANCED_STAT_LABELS.ammo_damage and raw_slash then
+					ele.cap:SetTextColor(CLR.white)
+					ele.txt:SetText(raw_slash)
 					ele.txt:Show(true)
+					ele.txt:SetTextColor(CLR.white)
 				end
-				ele.txt:SetTextColor(CLR.white)
 			end
 		end
+	end
+
+	if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.apply_to_tooltip then
+		dorn_weapon_tooltip_stats.apply_to_tooltip(info, obj, sec)
 	end
 end
 
@@ -289,9 +284,9 @@ local HIT_POWER_STAT = {
 	},
 }
 
--- Max damage (no-armor vs Torso) per ammo type, table order: 45/38/22/18
-local AMMO_TORSO_STAT = {
-	index = 3,
+-- Max raw damage (hit_power x k_hit x pellets) per ammo type, table order: 45/38/22/18
+local RAW_AMMO_DAMAGE_STAT = {
+	index = 302,
 	typ = "float",
 	name = "ui_dorn_wpn_ammo_torso",
 	icon_p = "ui_wp_prop_damage",
@@ -302,13 +297,56 @@ local AMMO_TORSO_STAT = {
 	compare = false,
 	sign = false,
 	show_always = true,
-	value_functor = { "zz_dorn_weapon_tooltip_main", "prop_ammo_torso_slash_flag" },
+	value_functor = { "zz_dorn_weapon_tooltip_main", "prop_raw_ammo_damage_slash_flag" },
 }
 
-DAMAGE_STAT_BY_MODE = {
-	hit_power = HIT_POWER_STAT,
-	damage = AMMO_TORSO_STAT,
-}
+local function apply_enhanced_weapon_stats()
+	if not utils_ui or not utils_ui.stats_table then
+		return
+	end
+
+	local weapon_stats = utils_ui.stats_table["weapon"]
+	if not weapon_stats then
+		return
+	end
+
+	if CONFIG.show_enhanced_weapon_stats then
+		weapon_stats["damage"] = HIT_POWER_STAT
+		weapon_stats["dorn_ammo_damage"] = RAW_AMMO_DAMAGE_STAT
+	else
+		weapon_stats["damage"] = nil
+		weapon_stats["dorn_ammo_damage"] = nil
+	end
+end
+
+local function read_show_enhanced_weapon_stats()
+	if not DORN or not DORN.mcm then
+		return true
+	end
+
+	if DORN.mcm.get(MOD_ID, "main/show_enhanced_weapon_stats") ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/show_enhanced_weapon_stats", true)
+	end
+
+	local mode = DORN.mcm.string(MOD_ID, "main/damage_stat", nil)
+	if mode == "raw_hit_power" then
+		mode = "hit_power"
+	elseif mode == "ammo_torso" then
+		mode = "damage"
+	end
+	if mode == "off" then
+		return false
+	end
+	if mode == "hit_power" or mode == "damage" then
+		return true
+	end
+
+	if DORN.mcm.get(MOD_ID, "main/show_damage_stat") ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/show_damage_stat", false)
+	end
+
+	return true
+end
 
 local logged_once = {}
 
@@ -339,47 +377,9 @@ local function log_item_once(reason, sec, msg)
 	log_once(reason .. ":" .. tostring(sec), msg)
 end
 
-local function apply_damage_stat()
-	if not utils_ui or not utils_ui.stats_table then
-		return
-	end
-
-	local weapon_stats = utils_ui.stats_table["weapon"]
-	if not weapon_stats then
-		return
-	end
-
-	weapon_stats["damage"] = DAMAGE_STAT_BY_MODE[CONFIG.damage_stat]
-end
-
-local function read_damage_stat_mode()
-	if not DORN or not DORN.mcm then
-		return "hit_power"
-	end
-
-	local mode = DORN.mcm.string(MOD_ID, "main/damage_stat", nil)
-	-- Retired modes fold into the closest current option.
-	if mode == "raw_hit_power" then
-		mode = "hit_power"
-	elseif mode == "ammo_torso" then
-		mode = "damage"
-	end
-	if mode == "off" or mode == "hit_power" or mode == "damage" then
-		return mode
-	end
-
-	-- Migrate the old boolean toggle (pre-dropdown MCM).
-	if DORN.mcm.get(MOD_ID, "main/show_damage_stat") ~= nil then
-		return DORN.mcm.bool(MOD_ID, "main/show_damage_stat", false) and "hit_power" or "off"
-	end
-
-	return "hit_power"
-end
-
--- Info tooltip panels we've hooked. UIInfoItem:Update caches by item id/section
--- and early-returns for the same item, so after an MCM change we must clear that
--- cache or the stats row (damage/hit-power) won't rebuild until a different item
--- is hovered.
+-- UIInfoItem:Update caches by item id/section and early-returns for the same
+-- item, so after an MCM change we must clear that cache or stat rows won't
+-- rebuild until a different item is hovered.
 local tracked_infos = setmetatable({}, { __mode = "k" })
 
 local function on_option_change()
@@ -388,11 +388,9 @@ local function on_option_change()
 	local prev_debug = CONFIG.debug_log
 	if DORN and DORN.mcm then
 		CONFIG.show_damage_table = DORN.mcm.bool(MOD_ID, "main/show_damage_table", true)
-		CONFIG.damage_stat = read_damage_stat_mode()
-		CONFIG.column_headers = DORN.mcm.string(MOD_ID, "main/column_headers", "brc")
-		if CONFIG.column_headers ~= "npc" then
-			CONFIG.column_headers = "brc"
-		end
+		CONFIG.show_enhanced_weapon_stats = read_show_enhanced_weapon_stats()
+		local headers = DORN.mcm.string(MOD_ID, "main/column_headers", "brc")
+		CONFIG.column_headers = headers == "npc" and "npc" or "brc"
 		CONFIG.debug_log = DORN.mcm.bool(MOD_ID, "development/debug_log", false)
 	end
 
@@ -400,14 +398,15 @@ local function on_option_change()
 		logged_once = {}
 	end
 
-	apply_damage_stat()
+	refresh_enhanced_stat_labels()
+	apply_enhanced_weapon_stats()
 	for info in pairs(tracked_infos) do
 		info.id = nil
 		info.section = nil
 	end
 
-	log_once("config", string.format("config: show_damage_table=%s, damage_stat=%s, column_headers=%s",
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.damage_stat), tostring(CONFIG.column_headers)))
+	log_once("config", string.format("config: show_damage_table=%s, show_enhanced_weapon_stats=%s",
+		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_enhanced_weapon_stats)))
 end
 
 local function first_number(str)
@@ -433,8 +432,8 @@ function prop_hit_power(obj, sec)
 end
 
 -- Sentinel so the stat row shows; display text is set in apply_custom_stat_display.
-function prop_ammo_torso_slash_flag(obj, sec)
-	if format_ammo_torso_damage_slash(obj, sec) then
+function prop_raw_ammo_damage_slash_flag(obj, sec)
+	if format_raw_ammo_damage_slash(obj, sec) then
 		return 1
 	end
 end
@@ -693,20 +692,23 @@ local function build_ammo_damage_rows(obj, sec)
 	}
 end
 
--- Per-ammo max damage (no-armor / first vs Torso column), in the same ammo
--- order as the damage table. Uses the exact same combat calc as the table.
-function format_ammo_torso_damage_slash(obj, sec)
-	local damage_data = build_ammo_damage_rows(obj, sec)
-	if not damage_data or not damage_data.rows then
+-- Per-ammo raw damage (hit_power x k_hit x pellets, no range or armor), same
+-- ammo order as the damage table.
+format_raw_ammo_damage_slash = function(obj, sec)
+	local rounds = collect_sorted_ammo_rounds(obj, sec, nil)
+	if not rounds then
+		return nil
+	end
+
+	local hit_power = gun_hit_power(obj, sec)
+	if hit_power <= 0 then
 		return nil
 	end
 
 	local parts = {}
-	for _, row in ipairs(damage_data.rows) do
-		local cell = row.torso and row.torso[1]
-		if cell and cell.text and cell.text ~= "" then
-			parts[#parts + 1] = cell.text
-		end
+	for _, r in ipairs(rounds) do
+		local dmg = math.floor(hit_power * r.k_hit * r.pellets * DAMAGE_SCALE + 0.5)
+		parts[#parts + 1] = tostring(dmg)
 	end
 
 	if #parts == 0 then
@@ -1071,11 +1073,18 @@ end
 -- falls through to the stock implementation.
 local base_get_stats_xml
 
+local function is_enhanced_custom_stat(grp)
+	if not CONFIG.show_enhanced_weapon_stats or not grp or not grp.name then
+		return false
+	end
+	return grp.name == "ui_dorn_wpn_hit_power" or grp.name == "ui_dorn_wpn_ammo_torso"
+end
+
 local function build_white_stat_xml(handler, obj, sec, gr, stat)
 	local value, nclr
 
 	if gr.name == "ui_dorn_wpn_ammo_torso" then
-		value = format_ammo_torso_damage_slash(obj, sec)
+		value = format_raw_ammo_damage_slash(obj, sec)
 		nclr = false
 	else
 		value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
@@ -1083,6 +1092,10 @@ local function build_white_stat_xml(handler, obj, sec, gr, stat)
 
 	if not value then
 		return
+	end
+
+	if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.append_to_value_string then
+		value = dorn_weapon_tooltip_stats.append_to_value_string(value, gr.name, obj, sec)
 	end
 
 	local st = STAT_XML:InitStatic("item_info:stats_box", handler)
@@ -1104,16 +1117,56 @@ local function build_white_stat_xml(handler, obj, sec, gr, stat)
 	return st
 end
 
+local function append_weapon_stat_value(value, gr, obj, sec)
+	if not value or not gr or not gr.name then
+		return value
+	end
+	if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.append_to_value_string then
+		return dorn_weapon_tooltip_stats.append_to_value_string(value, gr.name, obj, sec)
+	end
+	return value
+end
+
+local function build_weapon_stat_xml(handler, obj, sec, gr, stat)
+	local value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
+	if not value then
+		return nil
+	end
+	value = append_weapon_stat_value(value, gr, obj, sec)
+
+	local st = STAT_XML:InitStatic("item_info:stats_box", handler)
+	local st_icon = STAT_XML:InitStatic("item_info:stats_box:icon", st)
+	st_icon:InitTexture(gr.icon_p)
+
+	local st_cap = STAT_XML:InitTextWnd("item_info:stats_box:cap", st)
+	st_cap:SetText(game.translate_string(gr.name))
+
+	local st_txt = STAT_XML:InitTextWnd("item_info:stats_box:prog_txt", st)
+	st_txt:SetText(value)
+	st_txt:SetTextColor(nclr and CLR.stat_neg or CLR.stat_pos)
+
+	st:SetAutoDelete(true)
+	return st
+end
+
 local function get_stats_xml_hook(handler, obj, sec, gr, stat)
 	local grp = gr
 	if type(grp) == "string" then
 		grp = utils_ui.stats_table and utils_ui.stats_table[grp]
 	end
 
-	if grp and not grp.track and grp.name and CONFIG.damage_stat ~= "off" then
-		local active_label = active_damage_stat_label()
-		if active_label and game.translate_string(grp.name) == active_label then
-			local ok, st = pcall(build_white_stat_xml, handler, obj, sec, grp, stat)
+	if grp and not grp.track and is_enhanced_custom_stat(grp) then
+		local ok, st = pcall(build_white_stat_xml, handler, obj, sec, grp, stat)
+		if ok and st then
+			return st
+		end
+	end
+
+	if CONFIG.show_enhanced_weapon_stats and grp and obj and IsWeapon(obj) and not grp.track
+		and dorn_weapon_tooltip_stats then
+		local append = dorn_weapon_tooltip_stats.append_for_name(grp.name, obj, sec)
+		if append then
+			local ok, st = pcall(build_weapon_stat_xml, handler, obj, sec, grp, stat)
 			if ok and st then
 				return st
 			end
@@ -1201,9 +1254,15 @@ local function uiinfo_init_hook(self, owner, delay)
 end
 
 local function uiinfo_update_hook(self, obj, sec, flags)
+	local same_item = (obj and self.id and obj:id() == self.id)
+		or (not obj and sec and self.section == sec)
+
 	base_uiinfo_update(self, obj, sec, flags)
-	apply_custom_stat_display(self, obj, sec)
-	refresh_weapon_damage_panel(self, obj, sec)
+
+	if not same_item then
+		apply_custom_stat_display(self, obj, sec)
+		refresh_weapon_damage_panel(self, obj, sec)
+	end
 end
 
 local ui_hooks_ok = false
@@ -1230,7 +1289,7 @@ end
 
 local function on_console_execute(cmd)
 	if cmd == "g_game_difficulty" then
-		apply_damage_stat()
+		apply_enhanced_weapon_stats()
 	end
 end
 
@@ -1250,7 +1309,7 @@ function on_game_start()
 	RegisterScriptCallback("on_option_change", on_option_change)
 
 	log_once("startup", string.format(
-		"loaded: dorn=%s, ui_hooks=%s, details_hook=%s, show_damage_table=%s, damage_stat=%s",
+		"loaded: dorn=%s, ui_hooks=%s, details_hook=%s, show_damage_table=%s, show_enhanced_weapon_stats=%s",
 		tostring(DORN ~= nil), tostring(ui_hooks_ok), tostring(details_hook_ok),
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.damage_stat)))
+		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_enhanced_weapon_stats)))
 end

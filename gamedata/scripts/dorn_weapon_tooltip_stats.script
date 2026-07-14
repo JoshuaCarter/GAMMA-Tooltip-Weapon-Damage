@@ -1,0 +1,275 @@
+--[[
+	Real-value stat appends for Dorn's Weapon Tooltip (accuracy, handling,
+	reliability, recoil, muzzle drop). Loaded before zz_dorn_weapon_tooltip_main.
+]]
+
+dorn_weapon_tooltip_stats = {}
+
+local S = dorn_weapon_tooltip_stats
+
+-- GAMMA actor.ltx movement dispersion (Actor_Weapon.cpp, VEL_MAX = 10 m/s).
+local ACTOR_DISP_BASE = 1.5
+local ACTOR_DISP_VEL = 2.5
+local ACTOR_CROUCH = -0.65
+local ACTOR_CROUCH_NO_ACC = -0.75
+local VEL_MAX = 10
+local SPEED_WALK = 2.5
+local SPEED_RUN = 5.0
+
+local GRAVITY = 9.81
+local DROP_RANGE_M = 100
+local WEAR_DROP = 0.10
+local SILENCER_WEAR_K = 1.25
+local RECOIL_KICK_THRESHOLD = 1.0
+
+local STAT_NAMES = {
+	accuracy = "ui_inv_accuracy",
+	handling = "ui_inv_handling",
+	reliability = "ui_inv_reli",
+	recoil = "ui_inv_recoil",
+	speed = "ui_inv_bspeed",
+}
+
+local function wpn_param(obj, sec, key, default)
+	if utils_item and utils_item.get_wpn_param then
+		return utils_item.get_wpn_param(obj, sec, key, default or 0) or default or 0
+	end
+	return tonumber(SYS_GetParam(0, sec, key, tostring(default or 0))) or default or 0
+end
+
+local function resolve_sec(obj, sec)
+	if sec and sec ~= "" then
+		return sec
+	end
+	if not obj then
+		return nil
+	end
+	return ini_sys:r_string_ex(obj:section(), "parent_section") or obj:section()
+end
+
+local function is_weapon_target(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not sec then
+		return false
+	end
+	if IsItem and IsItem("fake_ammo_wpn", sec) then
+		return false
+	end
+	if obj and IsWeapon(obj) then
+		return true
+	end
+	return IsWeapon(sec)
+end
+
+local function fmt_deg(v)
+	if v < 10 then
+		return string.format("%.1f°", v)
+	end
+	return string.format("%.0f°", v)
+end
+
+local function fmt_drop_m(v)
+	if v < 0.05 then
+		return string.format("-%.1fm @%dm", v, DROP_RANGE_M)
+	end
+	if v < 1 then
+		return string.format("-%.1fm @%dm", v, DROP_RANGE_M)
+	end
+	return string.format("-%.0fm @%dm", v, DROP_RANGE_M)
+end
+
+local function is_degraded_ammo(ammo_sec)
+	return ammo_sec:find("bad", 1, true) ~= nil
+end
+
+local function collect_ammo_impair_range(obj, sec)
+	local ammo_list = utils_item.get_ammo(sec, obj and obj:id() or nil)
+	if not ammo_list or not ammo_list[1] then
+		return nil, nil
+	end
+
+	local min_imp, max_imp = nil, nil
+	for _, ammo_sec in ipairs(ammo_list) do
+		if ini_sys:section_exist(ammo_sec) and not is_degraded_ammo(ammo_sec) then
+			local impair = ini_sys:r_float_ex(ammo_sec, "impair") or 1
+			if not min_imp or impair < min_imp then
+				min_imp = impair
+			end
+			if not max_imp or impair > max_imp then
+				max_imp = impair
+			end
+		end
+	end
+	return min_imp, max_imp
+end
+
+local function hip_spread_for_weapon(obj, sec, speed, crouch, crouch_no_acc)
+	local fire_disp = wpn_param(obj, sec, "fire_dispersion_base", 0)
+	if fire_disp <= 0 then
+		return nil
+	end
+	local pdm_base = wpn_param(obj, sec, "PDM_disp_base", 1)
+	local pdm_vel = wpn_param(obj, sec, "PDM_disp_vel_factor", 1)
+	local pdm_crouch = wpn_param(obj, sec, "PDM_disp_crouch", 1)
+	local pdm_cna = wpn_param(obj, sec, "PDM_disp_crouch_no_acc", 1)
+
+	local vel = 1 + (speed / VEL_MAX) * ACTOR_DISP_VEL * pdm_vel
+	local mult = ACTOR_DISP_BASE * pdm_base * vel * vel
+	if crouch then
+		mult = mult * (1 + ACTOR_CROUCH * pdm_crouch)
+		if crouch_no_acc then
+			mult = mult * (1 + ACTOR_CROUCH_NO_ACC * pdm_cna)
+		end
+	end
+	return fire_disp * mult
+end
+
+function S.append_accuracy(obj, sec)
+	local v = wpn_param(obj, sec, "fire_dispersion_base", 0)
+	if v <= 0 then
+		return nil
+	end
+	return fmt_deg(v)
+end
+
+function S.append_handling(obj, sec)
+	local walk = hip_spread_for_weapon(obj, sec, SPEED_WALK, false, false)
+	local run = hip_spread_for_weapon(obj, sec, SPEED_RUN, false, false)
+	if not walk or not run then
+		return nil
+	end
+	return string.format("walk %s · run %s hip", fmt_deg(walk), fmt_deg(run))
+end
+
+function S.append_reliability(obj, sec)
+	local dec = wpn_param(obj, sec, "condition_shot_dec", 0)
+	if dec <= 0 then
+		return nil
+	end
+
+	local min_imp, max_imp = collect_ammo_impair_range(obj, sec)
+	min_imp = min_imp or 1
+	max_imp = max_imp or min_imp
+
+	local best = math.floor(WEAR_DROP / (dec * min_imp) + 0.0001)
+	local worst = math.floor(WEAR_DROP / (dec * max_imp * SILENCER_WEAR_K) + 0.0001)
+	if best < 1 then
+		best = 1
+	end
+	if worst < 1 then
+		worst = 1
+	end
+
+	if best == worst then
+		return string.format("%d", best)
+	end
+	return string.format("%d–%d", worst, best)
+end
+
+function S.append_recoil(obj, sec)
+	local disp = wpn_param(obj, sec, "zoom_cam_dispersion", 0)
+	if disp <= 0 then
+		return nil
+	end
+	local inc = wpn_param(obj, sec, "zoom_cam_dispersion_inc", 0)
+
+	local first = fmt_deg(disp)
+	if inc <= 0 or disp >= RECOIL_KICK_THRESHOLD then
+		return first .. " @1"
+	end
+
+	local n = math.ceil((RECOIL_KICK_THRESHOLD - disp) / inc) + 1
+	local kick_n = disp + inc * (n - 1)
+	return string.format("%s @1 → %s @%d", first, fmt_deg(kick_n), n)
+end
+
+function S.append_drop(obj, sec)
+	local bullet_speed = wpn_param(obj, sec, "bullet_speed", 0)
+	if bullet_speed <= 0 then
+		return nil
+	end
+
+	local id = obj and obj:id()
+	local ammo_list = utils_item.get_ammo(sec, id)
+	local k_speed = 1
+	if ammo_list and ammo_list[1] then
+		k_speed = ini_sys:r_float_ex(ammo_list[1], "k_bullet_speed") or 1
+	end
+
+	local v = bullet_speed * k_speed
+	if v <= 0 then
+		return nil
+	end
+
+	local drop = GRAVITY * DROP_RANGE_M * DROP_RANGE_M / (2 * v * v)
+	return fmt_drop_m(drop)
+end
+
+function S.build_appends(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
+
+	return {
+		[STAT_NAMES.accuracy] = S.append_accuracy(obj, sec),
+		[STAT_NAMES.handling] = S.append_handling(obj, sec),
+		[STAT_NAMES.reliability] = S.append_reliability(obj, sec),
+		[STAT_NAMES.recoil] = S.append_recoil(obj, sec),
+		[STAT_NAMES.speed] = S.append_drop(obj, sec),
+	}
+end
+
+function S.append_for_name(name_id, obj, sec)
+	local appends = S.build_appends(obj, sec)
+	if not appends then
+		return nil
+	end
+	return appends[name_id]
+end
+
+local function join_value(base, append)
+	if not append or append == "" then
+		return base
+	end
+	if not base or base == "" then
+		return append
+	end
+	return base .. " · " .. append
+end
+
+function S.apply_to_tooltip(info, obj, sec)
+	if not info or not info.stats then
+		return
+	end
+
+	local appends = S.build_appends(obj, sec)
+	if not appends then
+		return
+	end
+
+	for _, ele in pairs(info.stats) do
+		if ele.cap and ele.txt and ele.cap.GetText then
+			local cap = ele.cap:GetText()
+			if cap then
+				for _, name_id in pairs(STAT_NAMES) do
+					local append = appends[name_id]
+					if append and cap == game.translate_string(name_id) then
+						local base = ele.txt:IsShown() and ele.txt:GetText() or ""
+						ele.txt:SetText(join_value(base, append))
+						ele.txt:Show(true)
+						ele.txt:SetTextColor(CLR and CLR.value or GetARGB(255, 175, 175, 175))
+					end
+				end
+			end
+		end
+	end
+end
+
+function S.append_to_value_string(value, name_id, obj, sec)
+	local append = S.append_for_name(name_id, obj, sec)
+	if append then
+		return join_value(value, append)
+	end
+	return value
+end

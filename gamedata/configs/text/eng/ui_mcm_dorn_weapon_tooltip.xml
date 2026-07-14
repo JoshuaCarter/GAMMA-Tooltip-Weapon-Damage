@@ -13,11 +13,11 @@
 	<string id="ui_mcm_dorn_weapon_tooltip_info_overview">
 		<text>Weapon tooltips now show a DAMAGE panel below the description, the columns are:\n\n- Type: Shows an ammo type available to this weapon.\n- AP: Shows the AP value of the ammo.\n- vs Torso (BRC): Show how much damage this weapon + ammo will do to an NPC with an armor value equivalent to the shown BRC value.\n- vs Head (BRC): Same but vs the head.\n\nDamage numbers are colored grey to green according to how well they penetrate that BRC value.</text>
 	</string>
-	<string id="ui_mcm_dorn_weapon_tooltip_info_damage_stat">
-		<text>The optional weapon damage stat row (Main settings) can show:\n\n- Hit Power: weapon hit_power as % per pellet, no ammo modifier (pellet count is only applied in the damage table)\n- Damage Per Ammo: max damage (no armor) per ammo type using the same calc as the table, in the table's ammo order, e.g. 45/38/22/18\n\nDegraded ammo is ignored for the damage stat rows.</text>
+	<string id="ui_mcm_dorn_weapon_tooltip_info_enhanced_stats">
+		<text>Enhanced weapon stats (Main settings) adds real values to the stock stat rows and two custom rows:\n\n- Hit Power: weapon hit_power as % per pellet, no ammo modifier\n- Damage Per Ammo: raw hit_power x k_hit x pellets per ammo type (no range, no armor), slash-separated in table ammo order\n- Accuracy, Handling, Reliability, Recoil, Muzzle Velocity: real values appended after the stock bar/text\n\nDegraded ammo is ignored for the damage stat rows.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_info_armor_columns">
-		<text>Under the hood, every damage value uses hidden NPC bone-armor values (spine for torso, head bone for headshots), not the BRC values you see on armor. The BRC values are used to make things easier to understand. You can swap to NPC armor % values if you prefer.</text>
+		<text>Under the hood, every damage value uses hidden NPC bone-armor values (spine for torso, head bone for headshots), not the BRC values you see on armor. The BRC values are used to make things easier to understand.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_info_torso_tiers">
 		<text>What each vs Torso BRC column roughly matches in GAMMA:\n- 10 - Novice: leather jacket, no armor (stalker_novice)\n- 20 - Trainee: light loner jacket (stalker_trainee)\n- 30 - Professional: LCS vest / PS5-M (stalker_professional)\n- 40 - Veteran: PS5 suit / soldier vest (stalker_veteran)\n- 50 - Master: SKAT-9 / Berill heavy armor (stalker_master)\n- 60 - Legend: exoskeleton (stalker_legend)</text>
@@ -40,26 +40,11 @@
 	<string id="ui_mcm_dorn_weapon_tooltip_show_damage_table">
 		<text>Show damage table</text>
 	</string>
-	<string id="ui_mcm_dorn_weapon_tooltip_damage_stat">
-		<text>Weapon damage stat row</text>
+	<string id="ui_mcm_dorn_weapon_tooltip_show_enhanced_weapon_stats">
+		<text>Show enhanced weapon stats</text>
 	</string>
-	<string id="dorn_weapon_tooltip_main_damage_stat_lst_off">
-		<text>Off</text>
-	</string>
-	<string id="dorn_weapon_tooltip_main_damage_stat_lst_hit_power">
-		<text>Hit Power</text>
-	</string>
-	<string id="dorn_weapon_tooltip_main_damage_stat_lst_damage">
-		<text>Damage Per Ammo</text>
-	</string>
-	<string id="dorn_weapon_tooltip_main_column_headers_lst_brc">
-		<text>Player BRC (tier)</text>
-	</string>
-	<string id="dorn_weapon_tooltip_main_column_headers_lst_npc">
-		<text>NPC armor %</text>
-	</string>
-	<string id="ui_mcm_dorn_weapon_tooltip_column_headers">
-		<text>Damage column headers</text>
+	<string id="dorn_weapon_tooltip_show_enhanced_weapon_stats_desc">
+		<text>Adds Hit Power and raw Damage Per Ammo stat rows, plus real values on Accuracy, Handling, Reliability, Recoil, and Muzzle Velocity.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_debug_log">
 		<text>Enable debug logging</text>
