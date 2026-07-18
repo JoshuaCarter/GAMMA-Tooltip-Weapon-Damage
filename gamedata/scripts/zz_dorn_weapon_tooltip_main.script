@@ -110,16 +110,17 @@ local NUM_TORSO_TIERS = #TORSO_TIERS
 local NUM_HEAD_TIERS = #HEAD_TIERS
 
 -- Live combat math follows CQC grok_bo (higher load order than GBOOBS):
--- combat AP = ini k_ap x10 x ap_scale x barrel / range_factor x 0.80 x difficulty
---   x silencer (1.07 when equipped / integrated, if MCM apply_silencer_table/stats).
+-- combat AP = (ini k_ap + sniper 0.05) x10 x ap_scale x barrel / range_factor
+--   x 0.80 x difficulty x silencer (1.07 when equipped / integrated, if MCM on).
 -- Bone mults from CQC stalker_damage. Difficulty from CQC/GAMMA diff_game type.
--- Sniper +0.05 AP omitted (generic tooltip). Mutant path has no silencer in CQC.
+-- Mutant path has no silencer in CQC; species/weak-spot mults are rule-of-thumb only.
 local BONE_DMG_TORSO = 0.9    -- bip01_spine
 local BONE_DMG_HEAD  = 3.65   -- bip01_head
 local BALLISTIC_BONUS = 1.1
 local K_AP_COMBAT_SCALE = 10  -- CQC: ini k_ap * 10 for combat
 local AP_TAIL = 0.80          -- CQC post-grouping AP adjustment
 local SILENCER_BOOST = 1.07
+local SNIPER_AP_BONUS = 0.05  -- CQC: added to raw k_ap for listed snipers
 -- CQC integrated_silencer table (parent_section keys).
 local INTEGRATED_SILENCER = {
 	["wpn_dvl10_m1"] = true,
@@ -134,6 +135,27 @@ local INTEGRATED_SILENCER = {
 	["wpn_mp5sd"] = true,
 	["wpn_mp5sd_custom"] = true,
 	["wpn_mp5sd_new"] = true,
+}
+-- CQC snipers table (parent_section keys). +0.05 to raw k_ap before combat scale.
+local SNIPERS = {
+	["wpn_dvl10_m1"] = true,
+	["wpn_dvl10"] = true,
+	["wpn_l96a1"] = true,
+	["wpn_l96a1m"] = true,
+	["wpn_m98b"] = true,
+	["wpn_m24"] = true,
+	["wpn_remington700"] = true,
+	["wpn_remington700_archangel"] = true,
+	["wpn_remington700_lapua700"] = true,
+	["wpn_remington700_magpul_pro"] = true,
+	["wpn_remington700_mod_x_gen3"] = true,
+	["wpn_steyr_scout_big"] = true,
+	["wpn_sv98"] = true,
+	["wpn_sv98_custom"] = true,
+	["wpn_k98_mod"] = true,
+	["wpn_wa2000"] = true,
+	["wpn_trg"] = true,
+	["wpn_mosin"] = true,
 }
 local DIFFICULTY_MULT = {
 	[1] = 1.3,
@@ -1433,7 +1455,19 @@ local function silencer_mult(obj, sec, enabled)
 	return 1
 end
 
--- CQC: (k_ap x10) x ap_scale x barrel / range_factor x 0.80 x difficulty x silencer.
+-- CQC sniper list: +0.05 on raw ammo k_ap before the x10 combat scale.
+local function sniper_ap_bonus(sec)
+	if not sec then
+		return 0
+	end
+	local parent = ini_sys:r_string_ex(sec, "parent_section") or sec
+	if SNIPERS[parent] then
+		return SNIPER_AP_BONUS
+	end
+	return 0
+end
+
+-- CQC: (k_ap + sniper) x10 x ap_scale x barrel / range_factor x 0.80 x difficulty x silencer.
 local function combat_ap(k_ap_ltx, air_res, dist, ap_scale, barrel, silencer)
 	return (k_ap_ltx * K_AP_COMBAT_SCALE)
 		* ap_scale * (barrel or 1)
@@ -1620,14 +1654,16 @@ local function build_ammo_damage_rows(obj, sec)
 	local dist = calc_range()
 	local barrel = barrel_mult(obj, CONFIG.use_condition_table)
 	local silencer = silencer_mult(obj, sec, CONFIG.apply_silencer_table)
+	local sniper_ap = sniper_ap_bonus(sec)
 	local rows = {}
 	for _, r in ipairs(rounds) do
+		local k_ap = r.k_ap + sniper_ap
 		local torso = fmt_tier_cells(calc_tier_damages(
-			hit_power, r.k_hit, r.k_ap, r.air_res, TORSO_TIERS,
+			hit_power, r.k_hit, k_ap, r.air_res, TORSO_TIERS,
 			false, dist, r.pellets, barrel, r.sec, silencer
 		), NUM_TORSO_TIERS)
 		local head = fmt_tier_cells(calc_tier_damages(
-			hit_power, r.k_hit, r.k_ap, r.air_res, HEAD_TIERS,
+			hit_power, r.k_hit, k_ap, r.air_res, HEAD_TIERS,
 			true, dist, r.pellets, barrel, r.sec, silencer
 		), NUM_HEAD_TIERS)
 		rows[#rows + 1] = {

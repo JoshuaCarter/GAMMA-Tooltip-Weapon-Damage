@@ -50,7 +50,7 @@ function set_burst_threshold(deg)
 	RECOIL_KICK_THRESHOLD = n
 end
 
--- When true, attached silencer LTX *_k modifiers apply to Burst Size.
+-- When true, attached silencer LTX *_k modifiers apply to Burst Size and Bullet Drop.
 local APPLY_SILENCER = false
 
 function set_apply_silencer(enabled)
@@ -222,7 +222,7 @@ local function fmt_deg(v)
 end
 
 local function fmt_drop_m(v)
-	return string.format("%.2fm %%c[dark_gray]@%dm%%c[default]", v, DROP_RANGE_M)
+	return string.format("%.2fm %%c[dark_gray]@ %dm%%c[default]", v, DROP_RANGE_M)
 end
 
 -- Numeric getters (for tooltip compare vs equipped). Lower-is-better where noted.
@@ -363,7 +363,7 @@ function text_barrel_wear(obj, sec)
 	else
 		chance_txt = string.format("%.1f%%", chance_pct)
 	end
-	return string.format("%s %%c[dark_gray]@ -1%%%c[default]", chance_txt)
+	return string.format("%s %%c[dark_gray]@ -1%%%%c[default]", chance_txt)
 end
 
 -- Fractional ADS shots until cumulative vertical camera climb reaches RECOIL_KICK_THRESHOLD.
@@ -500,13 +500,28 @@ function value_bullet_drop(obj, sec)
 	end
 
 	local v = bullet_speed * k_speed
+	-- Boomsticks silencers: bullet_speed_k (often ~0.9; some cans lower).
+	local sil = attached_silencer_sec(obj)
+	local speed_k = 1
+	if sil then
+		speed_k = ini_float(sil, "bullet_speed_k") or 1
+		if speed_k > 0 then
+			v = v * speed_k
+		else
+			speed_k = 1
+		end
+	end
 	if v <= 0 then
 		log_once("drop_fail:" .. tostring(sec), string.format(
-			"bullet_drop [%s]: bullet_speed=%s k_speed=%s ammo=%s",
-			tostring(sec), tostring(bullet_speed), tostring(k_speed), tostring(ammo0)))
+			"bullet_drop [%s]: bullet_speed=%s k_speed=%s speed_k=%s ammo=%s sil=%s",
+			tostring(sec), tostring(bullet_speed), tostring(k_speed), tostring(speed_k),
+			tostring(ammo0), tostring(sil)))
 		v = ini_float(sec, "bullet_speed") or 0
 		if v <= 0 then
 			return 999
+		end
+		if sil and speed_k > 0 and speed_k ~= 1 then
+			v = v * speed_k
 		end
 	end
 
