@@ -1,71 +1,11 @@
 --[[
-	Dorn's Weapon Tooltip
+	Dorn's Weapon Tooltip — per-ammo damage table + enhanced weapon stats.
 
-	Adds a per-ammo damage breakdown to weapon inventory tooltips and the
-	weapon details popup (no LTX edits, all values read live). Renders below
-	the flavor description via ui_dorn_weapon_tooltip.xml: the entire layout AND all static text live in the
-	XML; the script only fills the dynamic number cells (each number is its own
-	cell) and shows/hides rows. No icons - the type label carries the color.
+	Layout/static text: ui_dorn_weapon_tooltip.xml. This script fills cells and
+	wires MCM / utils_ui.stats_table.
 
-	    DAMAGE:              vs Torso                              vs Head
-	    Type  AP Min Lgt Lgt+ Mid Mid+ Hvy Hvy+ Exo Max  Min Lgt Mid Hvy Max
-	    AP    51  ..  ..   ..  ..   ..  ..   ..  ..  ..   ..  ..  ..  ..  ..
-	    FMJ   20  ..  ..   ..  ..   ..  ..   ..  ..  ..   ..  ..  ..  ..  ..
-
-	where
-	    AP <n>    = ammo k_ap x 1000 (matches the ammo's own info card),
-	    columns   = named prevalent NPC bone-armor floats (combat_ap >= armor).
-	                Failed-pen chip uses the average hit_fraction for that
-	                exact armor only.
-
-	One row per ammo round (Type label from AMMO_TYPE_SHORT map; unknown = ????).
-	Type label color from AMMO_TYPE_COLOR (fallback grey).
-	AP column grey-to-ammo-type color. Shift columns via XML.
-
-	This script is prefixed zz_ on purpose: G.A.M.M.A. Accurate Defense Values
-	rebuilds utils_ui.stats_table["weapon"] wholesale in ish_item_stats'
-	on_game_start (and on difficulty change), which would wipe our re-enabled
-	Damage row. Loading last (zz_) means our on_game_start / on_console_execute
-	run after theirs, so the row sticks.
-
-	Two optional MCM settings:
-
-	1. show_damage_table - per-ammo DAMAGE panel below the description (on by default).
-
-	2. column_headers - "names" (Min/Lgt/...) or "raw" (0.011/0.075/...).
-
-	3. ammo_order - "damage" (dmg desc, AP asc), "ap" (AP desc), or
-	   "default" (same order as tooltip ammo icons / ammo_class).
-
-	4. calc_range - assumed distance in meters for damage math (0-200, default 20).
-	   drop_range - Bullet Drop distance (100-2000, default 200).
-	   burst_threshold - Burst Control climb target in degrees (1-10, step 0.5, default 3).
-
-	5. use_condition_table / use_condition_stats - when on, apply CQC
-	   barrel-condition factors to the damage table / slash damage stats
-	   (off = assume 100%).
-
-	6. apply_silencer - when on (default), multiply stalker AP and damage by
-	   CQC's 1.07 if a silencer is attached or the weapon has an integrated
-	   suppressor. Mutant hits do not use this in live CQC.
-
-	7. show_hit_power / show_stalker_damage / show_mutant_damage - Hit Power,
-	   DMG vs Stalkers, and DMG vs Mutants rows (each on by default).
-
-	8. show_accuracy / show_handling / show_fire_rate / show_mag_size /
-	   show_max_range / show_muzzle_velocity / show_reliability / show_recoil -
-	   base Momopate/vanilla rows (each on by default).
-
-	9. Companion rows (MCM keys keep old names for saved settings):
-	   show_base_spread = Base Spread, show_movement_spread = Move Spread,
-	   show_weapon_wear = Bullet Wear, show_burst_control, show_bullet_drop.
-	   Placement via stat_row_placement.
-
-	10. stat_row_placement - "inline" (after related base row, or in that
-	   base row's slot when the base row is hidden), "start" (block at the
-	   top of the list), or "after" (block at the end of the list).
-
-	Development: debug_overlay MCM toggle shows crosshair rangefinder via DORN.dbg overlay.
+	Prefixed zz_ so on_game_start runs after G.A.M.M.A. Accurate Defense Values
+	(ish_item_stats), which rebuilds stats_table["weapon"] and would wipe our rows.
 ]]
 
 local MOD_ID = "dorn_weapon_tooltip"
@@ -82,11 +22,11 @@ local CONFIG = {
 	show_handling = true,
 	show_fire_rate = true,
 	show_mag_size = true,
-	show_max_range = true,
 	show_reliability = true,
 	show_recoil = true,
 	show_muzzle_velocity = true,
 	show_base_spread = true,
+	show_dispersion = true,
 	show_movement_spread = true,
 	show_weapon_wear = true,
 	show_burst_control = true,
@@ -110,7 +50,6 @@ local BASE_INDEX = {
 	damage = 3,
 	fire_rate = 4,
 	ammo_mag_size = 5,
-	max_range = 100,
 	speed = 101,
 	reliability = 103,
 	recoil = 104,
@@ -118,6 +57,7 @@ local BASE_INDEX = {
 
 -- Fallback string ids if dorn_weapon_tooltip_stats failed to expose NAME.
 local EXTRA_STAT_NAME = {
+	dispersion = "ui_dorn_wpn_dispersion",
 	base_spread = "ui_dorn_wpn_base_spread",
 	movement_spread = "ui_dorn_wpn_movement_spread",
 	weapon_wear = "ui_dorn_wpn_weapon_wear",
@@ -241,6 +181,22 @@ local function format_armor_label(armor)
 	end
 	local s = string.format("%.3f", armor)
 	return (s:gsub("0+$", ""):gsub("%.$", ""))
+end
+
+-- Same armor value as integer (x100, floored).
+local function format_armor_label_x100(armor)
+	return string.format("%d", math.floor(armor * 100))
+end
+
+local function column_header_text(tier)
+	local mode = CONFIG.column_headers
+	if mode == "raw" then
+		return format_armor_label(tier.armor)
+	end
+	if mode == "raw100" then
+		return format_armor_label_x100(tier.armor)
+	end
+	return tier.name
 end
 
 -- Fixed Type-column short names (≤6 chars). Source: ammo_type_label_reference.md.
@@ -398,6 +354,7 @@ local function refresh_enhanced_stat_labels()
 		stalker_damage = game.translate_string("ui_dorn_wpn_stalker_damage"),
 		ammo_damage = game.translate_string("ui_dorn_wpn_ammo_torso"),
 		base_spread = game.translate_string("ui_dorn_wpn_base_spread"),
+		dispersion = game.translate_string("ui_dorn_wpn_dispersion"),
 		movement_spread = game.translate_string("ui_dorn_wpn_movement_spread"),
 		weapon_wear = game.translate_string("ui_dorn_wpn_weapon_wear"),
 		burst_control = game.translate_string("ui_dorn_wpn_burst_control"),
@@ -431,6 +388,9 @@ local function dorn_custom_stat_text(cap, obj, sec)
 	end
 	local S = dorn_weapon_tooltip_stats
 	local N = S.NAME
+	if CONFIG.show_dispersion and cap == ENHANCED_STAT_LABELS.dispersion then
+		return S.text_for_name(N.dispersion, obj, sec)
+	end
 	if CONFIG.show_base_spread and cap == ENHANCED_STAT_LABELS.base_spread then
 		return S.text_for_name(N.base_spread, obj, sec)
 	end
@@ -478,7 +438,10 @@ local function apply_custom_stat_display(info, obj, sec)
 					if custom then
 						ele.cap:SetTextColor(CLR.white)
 						if cap == ENHANCED_STAT_LABELS.stalker_damage
-							or cap == ENHANCED_STAT_LABELS.ammo_damage then
+							or cap == ENHANCED_STAT_LABELS.ammo_damage
+							or cap == ENHANCED_STAT_LABELS.bullet_drop
+							or cap == ENHANCED_STAT_LABELS.dispersion
+							or cap == ENHANCED_STAT_LABELS.burst_control then
 							ele.txt:SetTextComplexMode(true)
 						end
 						ele.txt:SetText(custom)
@@ -649,42 +612,69 @@ local function inline_companion_index(parent_key, parent_shown)
 	return parent_idx
 end
 
+-- Two companions under one parent (upper first). Dispersion sits above Base Spread.
+local function inline_companion_pair(parent_key, parent_shown, upper_shown, lower_shown)
+	local parent_idx = resolved_base_index(parent_key)
+	if parent_shown then
+		return parent_idx + 0.25, parent_idx + 0.5
+	end
+	if upper_shown and lower_shown then
+		return parent_idx, parent_idx + 0.25
+	end
+	if upper_shown then
+		return parent_idx, parent_idx
+	end
+	return parent_idx, parent_idx
+end
+
 local function placement_indices(weapon_stats)
 	if CONFIG.stat_row_placement == "after" then
-		-- Block at end of list (after remaining non-Dorn rows).
+		-- All Dorn rows at end of list (after remaining non-Dorn rows).
 		local base = max_non_dorn_weapon_index(weapon_stats)
 		return {
 			hit_power = base + 1,
 			stalker_damage = base + 2,
 			mutant_damage = base + 3,
-			base_spread = base + 4,
-			movement_spread = base + 5,
-			bullet_drop = base + 6,
-			weapon_wear = base + 7,
-			burst_control = base + 8,
+			dispersion = base + 4,
+			base_spread = base + 5,
+			movement_spread = base + 6,
+			bullet_drop = base + 7,
+			weapon_wear = base + 8,
+			burst_control = base + 9,
 		}
 	end
+
+	-- Hit Power / Stalker / Mutant have no related base row: always lead.
+	local dmg = {
+		hit_power = 0.1,
+		stalker_damage = 0.2,
+		mutant_damage = 0.3,
+	}
 
 	if CONFIG.stat_row_placement == "start" then
-		-- Block at start of list (before Accuracy / any non-Dorn rows).
+		-- Companions join the lead block before Accuracy / any non-Dorn rows.
 		return {
-			hit_power = 0.1,
-			stalker_damage = 0.2,
-			mutant_damage = 0.3,
-			base_spread = 0.4,
-			movement_spread = 0.5,
-			bullet_drop = 0.6,
-			weapon_wear = 0.7,
-			burst_control = 0.8,
+			hit_power = dmg.hit_power,
+			stalker_damage = dmg.stalker_damage,
+			mutant_damage = dmg.mutant_damage,
+			dispersion = 0.4,
+			base_spread = 0.5,
+			movement_spread = 0.6,
+			bullet_drop = 0.7,
+			weapon_wear = 0.8,
+			burst_control = 0.9,
 		}
 	end
 
-	local dmg_idx = resolved_base_index("damage")
+	-- Inline: companions after related base; damage trio still first.
+	local disp_idx, spread_idx = inline_companion_pair(
+		"accuracy", CONFIG.show_accuracy, CONFIG.show_dispersion, CONFIG.show_base_spread)
 	return {
-		hit_power = dmg_idx,
-		stalker_damage = dmg_idx + 0.25,
-		mutant_damage = dmg_idx + 0.5,
-		base_spread = inline_companion_index("accuracy", CONFIG.show_accuracy),
+		hit_power = dmg.hit_power,
+		stalker_damage = dmg.stalker_damage,
+		mutant_damage = dmg.mutant_damage,
+		dispersion = disp_idx,
+		base_spread = spread_idx,
 		movement_spread = inline_companion_index("handling", CONFIG.show_handling),
 		bullet_drop = inline_companion_index("speed", CONFIG.show_muzzle_velocity),
 		weapon_wear = inline_companion_index("reliability", CONFIG.show_reliability),
@@ -711,7 +701,6 @@ local function apply_enhanced_weapon_stats()
 	set_base_stat(weapon_stats, "handling", CONFIG.show_handling)
 	set_base_stat(weapon_stats, "fire_rate", CONFIG.show_fire_rate)
 	set_base_stat(weapon_stats, "ammo_mag_size", CONFIG.show_mag_size)
-	set_base_stat(weapon_stats, "max_range", CONFIG.show_max_range)
 	set_base_stat(weapon_stats, "reliability", CONFIG.show_reliability)
 	set_base_stat(weapon_stats, "recoil", CONFIG.show_recoil)
 	set_base_stat(weapon_stats, "speed", CONFIG.show_muzzle_velocity)
@@ -741,6 +730,8 @@ local function apply_enhanced_weapon_stats()
 	end
 
 	local N = (dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.NAME) or EXTRA_STAT_NAME
+	weapon_stats["dorn_dispersion"] = CONFIG.show_dispersion
+		and make_dorn_row(idx.dispersion, N.dispersion, "ui_wp_prop_tochnost", "prop_dispersion")
 	weapon_stats["dorn_base_spread"] = CONFIG.show_base_spread
 		and make_dorn_row(idx.base_spread, N.base_spread, "ui_wp_prop_tochnost", "prop_base_spread")
 		or nil
@@ -913,20 +904,22 @@ local function on_option_change()
 		CONFIG.show_handling = read_base_stat_flag("show_handling")
 		CONFIG.show_fire_rate = read_base_stat_flag("show_fire_rate")
 		CONFIG.show_mag_size = read_base_stat_flag("show_mag_size")
-		CONFIG.show_max_range = read_base_stat_flag("show_max_range")
 		CONFIG.show_reliability = read_base_stat_flag("show_reliability")
 		CONFIG.show_recoil = read_base_stat_flag("show_recoil")
 		CONFIG.show_muzzle_velocity = read_base_stat_flag("show_muzzle_velocity")
 		CONFIG.show_base_spread = read_extra_stat_flag("show_base_spread")
+		CONFIG.show_dispersion = read_extra_stat_flag("show_dispersion")
 		CONFIG.show_movement_spread = read_extra_stat_flag("show_movement_spread")
 		CONFIG.show_weapon_wear = read_extra_stat_flag("show_weapon_wear")
 		CONFIG.show_burst_control = read_extra_stat_flag("show_burst_control")
 		CONFIG.show_bullet_drop = read_extra_stat_flag("show_bullet_drop")
-		-- "raw" = bone armor floats; "names" = short class labels.
+		-- "raw" = bone armor floats; "raw100" = floats x100 floored; "names" = class labels.
 		-- Legacy MCM values: "npc" -> raw, "brc" -> names.
 		local headers = DORN.mcm.string(MOD_ID, "main/column_headers", "names")
 		if headers == "raw" or headers == "npc" then
 			CONFIG.column_headers = "raw"
+		elseif headers == "raw100" then
+			CONFIG.column_headers = "raw100"
 		else
 			CONFIG.column_headers = "names"
 		end
@@ -982,14 +975,15 @@ local function on_option_change()
 	end
 
 	log_once("config", string.format(
-		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s place=%s headers=%s order=%s range=%s cond=%s/%s sil=%s",
+		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s/%s place=%s headers=%s order=%s range=%s cond=%s/%s sil=%s",
 		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
 		tostring(CONFIG.show_mutant_damage),
 		tostring(CONFIG.show_accuracy), tostring(CONFIG.show_handling),
 		tostring(CONFIG.show_fire_rate), tostring(CONFIG.show_mag_size),
-		tostring(CONFIG.show_max_range), tostring(CONFIG.show_muzzle_velocity),
+		tostring(CONFIG.show_muzzle_velocity),
 		tostring(CONFIG.show_reliability), tostring(CONFIG.show_recoil),
-		tostring(CONFIG.show_base_spread), tostring(CONFIG.show_movement_spread),
+		tostring(CONFIG.show_dispersion), tostring(CONFIG.show_base_spread),
+		tostring(CONFIG.show_movement_spread),
 		tostring(CONFIG.show_weapon_wear), tostring(CONFIG.show_burst_control),
 		tostring(CONFIG.show_bullet_drop), tostring(CONFIG.stat_row_placement),
 		tostring(CONFIG.column_headers), tostring(CONFIG.ammo_order),
@@ -1033,6 +1027,13 @@ function prop_stalker_ammo_damage_slash_flag(obj, sec)
 end
 
 -- Sentinels for appended stat rows (real text applied in apply_custom_stat_display).
+function prop_dispersion(obj, sec)
+	local S = dorn_weapon_tooltip_stats
+	if S and S.text_dispersion and S.text_dispersion(obj, sec) then
+		return 1
+	end
+end
+
 function prop_base_spread(obj, sec)
 	local S = dorn_weapon_tooltip_stats
 	if S and S.text_base_spread and S.text_base_spread(obj, sec) then
@@ -1517,26 +1518,24 @@ local function apply_column_headers(fields)
 		return
 	end
 
-	local show_raw = CONFIG.column_headers == "raw"
-
 	if fields.grp_torso then
-		fields.grp_torso:SetText("vs Torso")
+		fields.grp_torso:SetText("vs Torso Armor")
 	end
 	if fields.grp_head then
-		fields.grp_head:SetText("vs Head")
+		fields.grp_head:SetText("vs Head Armor")
 	end
 
 	for i, tier in ipairs(TORSO_TIERS) do
 		local wnd = fields.col_labels.torso[i]
 		if wnd then
-			wnd:SetText(show_raw and format_armor_label(tier.armor) or tier.name)
+			wnd:SetText(column_header_text(tier))
 			wnd:SetTextColor(CLR.white)
 		end
 	end
 	for i, tier in ipairs(HEAD_TIERS) do
 		local wnd = fields.col_labels.head[i]
 		if wnd then
-			wnd:SetText(show_raw and format_armor_label(tier.armor) or tier.name)
+			wnd:SetText(column_header_text(tier))
 			wnd:SetTextColor(CLR.white)
 		end
 	end
@@ -1637,7 +1636,6 @@ local function create_damage_fields(parent, panel_x)
 	DAMAGE_XML:InitTextWnd("panel:header:title", header)
 	local grp_torso = DAMAGE_XML:InitTextWnd("panel:header:grp_torso", header)
 	local grp_head = DAMAGE_XML:InitTextWnd("panel:header:grp_head", header)
-	DAMAGE_XML:InitStatic("panel:sep", dlg)
 
 	local col_labels = { torso = {}, head = {} }
 	for _, name in ipairs(COL_HDR_2) do
@@ -1665,6 +1663,13 @@ local function create_damage_fields(parent, panel_x)
 		row.base:Show(false)
 		fields.rows[i] = row
 	end
+
+	-- After rows so 1px dividers paint above cell text windows.
+	fields.vlines = {
+		DAMAGE_XML:InitStatic("panel:vline_type_ap", dlg),
+		DAMAGE_XML:InitStatic("panel:vline_ap_torso", dlg),
+		DAMAGE_XML:InitStatic("panel:vline_torso_head", dlg),
+	}
 
 	fields.layout = read_layout_metrics(fields)
 	apply_column_headers(fields)
@@ -1719,6 +1724,20 @@ local function populate_damage_fields(fields, data, panel_width)
 	local w = panel_width or fields.dlg:GetWidth()
 	local panel_h = last_row_y + layout.row_h
 	fields.dlg:SetWndSize(vector2():set(w, panel_h))
+	-- Vertical dividers cover data-row text only (not headers / trailing gap).
+	if fields.vlines then
+		local top = layout.data_top_y
+		local text_h = 14
+		local h = last_row_y + text_h - top
+		if h < 1 then
+			h = 1
+		end
+		for _, vline in ipairs(fields.vlines) do
+			local pos = vline:GetWndPos()
+			vline:SetWndPos(vector2():set(pos.x, top))
+			vline:SetWndSize(vector2():set(1, h))
+		end
+	end
 	fields.dlg:Show(true)
 	return true
 end
@@ -1870,6 +1889,7 @@ local DORN_WHITE_STAT_NAMES = {
 	["ui_dorn_wpn_hit_power"] = true,
 	["ui_dorn_wpn_stalker_damage"] = true,
 	["ui_dorn_wpn_ammo_torso"] = true,
+	["ui_dorn_wpn_dispersion"] = true,
 	["ui_dorn_wpn_base_spread"] = true,
 	["ui_dorn_wpn_movement_spread"] = true,
 	["ui_dorn_wpn_weapon_wear"] = true,
@@ -1911,7 +1931,9 @@ local function build_white_stat_xml(handler, obj, sec, gr, stat)
 	st_cap:SetTextColor(CLR.white)
 
 	local st_txt = STAT_XML:InitTextWnd("item_info:stats_box:prog_txt", st)
-	if gr.name == "ui_dorn_wpn_ammo_torso" or gr.name == "ui_dorn_wpn_stalker_damage" then
+	if gr.name == "ui_dorn_wpn_ammo_torso" or gr.name == "ui_dorn_wpn_stalker_damage"
+		or gr.name == "ui_dorn_wpn_bullet_drop" or gr.name == "ui_dorn_wpn_dispersion"
+		or gr.name == "ui_dorn_wpn_burst_control" then
 		st_txt:SetTextComplexMode(true)
 	end
 	st_txt:SetText(value)
@@ -1971,7 +1993,7 @@ end
 local details_hook_ok = false
 
 -- Vanilla/Sota UIInfoItem only pre-creates 16 stat rows. Full Dorn + Momopate
--- can exceed that (max_range + 5 companions + 3 damage); expand once at init.
+-- can exceed that (companions + damage rows); expand once at init.
 local STAT_SLOT_TARGET = 24
 
 local function ensure_stat_slots(info)

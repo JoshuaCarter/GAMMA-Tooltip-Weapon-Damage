@@ -29,16 +29,16 @@
 		<text>Assumed range (meters) for damage calculations</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_drop_range">
-		<text>Bullet Drop range (meters)</text>
+		<text>Range for Dispersion/Drop (meters)</text>
 	</string>
 	<string id="dorn_weapon_tooltip_drop_range">
-		<text>Distance used for the Bullet Drop stat (how far the bullet falls over this range).</text>
+		<text>Distance used by Dispersion (lateral miss from Base Spread) and Bullet Drop.</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_burst_threshold">
-		<text>Burst Control climb target (degrees)</text>
+		<text>Burst Size climb target (degrees)</text>
 	</string>
 	<string id="dorn_weapon_tooltip_burst_threshold">
-		<text>ADS camera climb angle used by Burst Control (how many shots until recoil reaches this many degrees).</text>
+		<text>ADS camera climb angle used by Burst Size (how many shots until recoil reaches this many degrees).</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_apply_silencer">
 		<text>Apply silencer damage/AP boost when equipped</text>
@@ -46,8 +46,11 @@
 	<string id="ui_mcm_dorn_weapon_tooltip_stat_row_placement">
 		<text>Where to place new stats list rows</text>
 	</string>
+	<string id="dorn_weapon_tooltip_stat_row_placement">
+		<text>Companions (Dispersion, Base Spread, Move Spread, etc.) follow this. Hit Power / DMG vs Stalkers / DMG vs Mutants always lead unless End of list.</text>
+	</string>
 	<string id="dorn_weapon_tooltip_main_stat_row_placement_lst_inline">
-		<text>Inline (after related stat)</text>
+		<text>Inline (match toggle order below)</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_stat_row_placement_lst_start">
 		<text>Start of list</text>
@@ -65,10 +68,13 @@
 		<text>Damage table column headers</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_names">
-		<text>Armor tier names</text>
+		<text>Armor tier names [Min, Lgt, Lgt+, Mid, ...]</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_raw">
-		<text>Raw armor values</text>
+		<text>Raw NPC armor values [0.011, 0.075, ...]</text>
+	</string>
+	<string id="dorn_weapon_tooltip_main_column_headers_lst_raw100">
+		<text>Integer (raw armor x100 rounded down) [1, 7, 10, ...]</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_use_condition_table">
 		<text>Damage table uses barrel condition</text>
@@ -81,6 +87,9 @@
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_show_accuracy">
 		<text>%c[dark_gray]Show Accuracy Stat%c[default]</text>
+	</string>
+	<string id="ui_mcm_dorn_weapon_tooltip_show_dispersion">
+		<text>Show Dispersion Stat</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_show_base_spread">
 		<text>Show Base Spread Stat</text>
@@ -106,9 +115,6 @@
 	<string id="ui_mcm_dorn_weapon_tooltip_show_mag_size">
 		<text>%c[dark_gray]Show Mag Size Stat%c[default]</text>
 	</string>
-	<string id="ui_mcm_dorn_weapon_tooltip_show_max_range">
-		<text>%c[dark_gray]Show Max Range Stat%c[default]</text>
-	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_show_muzzle_velocity">
 		<text>%c[dark_gray]Show Muzzle Velocity Stat%c[default]</text>
 	</string>
@@ -125,10 +131,13 @@
 		<text>%c[dark_gray]Show Recoil Control Stat%c[default]</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_show_burst_control">
-		<text>Show Burst Control Stat</text>
+		<text>Show Burst Size Stat</text>
 	</string>
 
 	<!-- In-game tooltip stat labels (Stat List order) -->
+	<string id="ui_dorn_wpn_dispersion">
+		<text>Dispersion</text>
+	</string>
 	<string id="ui_dorn_wpn_base_spread">
 		<text>Base Spread</text>
 	</string>
@@ -151,7 +160,7 @@
 		<text>Bullet Wear</text>
 	</string>
 	<string id="ui_dorn_wpn_burst_control">
-		<text>Burst Control</text>
+		<text>Burst Size</text>
 	</string>
 
 	<!-- ===== Info ===== -->
@@ -177,6 +186,9 @@
 		<text>
 			New optional stat list items:
 			\n
+			\n%c[d_green]Dispersion%c[default]
+			\n - Base Spread angle translated into distance off target at the MCM Dispersion/Drop range (default 200m): range x tan(Base Spread).
+			\n
 			\n%c[d_green]Base Spread%c[default]
 			\n - Weapon fire_dispersion_base in degrees (the ADS bullet cone; actor add-on is near-zero while aiming).
 			\n - E.g. "0.35" means the final trajectory can be up to 0.35 degrees off center in any direction.
@@ -201,14 +213,14 @@
 			\n - Per-ammo values are colored like the damage-table Type labels.
 			\n
 			\n%c[d_green]Bullet Drop%c[default]
-			\n - How far a bullet drops over the MCM Bullet Drop range (default 200m; slider 100-2000).
+			\n - How far a bullet drops over the MCM Dispersion/Drop range (default 200m; slider 100-2000).
 			\n
 			\n%c[d_green]Bullet Wear%c[default]
 			\n - Average condition lost per shot (avg ammo impair x condition_shot_dec).
 			\n - Shown as a percentage of total condition.
 			\n
-			\n%c[d_green]Burst Control%c[default]
-			\n - How many consecutive ADS shots (at max fire rate) it takes for the camera to climb to the MCM Burst Control climb target (default 3 degrees; slider 1-10, step 0.5).
+			\n%c[d_green]Burst Size%c[default]
+			\n - How many consecutive ADS shots (at max fire rate) it takes for the camera to climb to the MCM Burst Size climb target (default 3 degrees; slider 1-10, step 0.5).
 		</text>
 	</string>
 	<!-- hdr_damage_table string is shared with Main -->
@@ -220,12 +232,12 @@
 			\n%c[d_green]Columns%c[default]:
 			\n - %c[d_blue]Type%c[default]: Ammo type used for damage calculations on this row (colored by ammo class: FMJ yellow, HP/BUCK teal, AP orange, etc.). Row order defaults to the tooltip ammo icons order (MCM can sort by DMG or AP instead).
 			\n - %c[d_blue]AP%c[default]: Armor penetration colored %c[dark_gray]grey%c[default] -> that row's ammo Type color by how well it punches through the listed armor values.
-			\n - %c[d_blue]vs Torso%c[default]: Damage for a given ammo vs a real torso armor value. Damage colored %c[dark_gray]grey%c[default] -> %c[d_green]green%c[default] for how close the value is to max damage for this weapon/ammo/bone.
-			\n - %c[d_blue]vs Head%c[default]: Same as %c[d_blue]vs Torso%c[default], but vs real head armor values, and with the x3.65 headshot damage mult factored in.
+			\n - %c[d_blue]vs Torso Armor%c[default]: Damage for a given ammo vs a real torso armor value. Damage colored %c[dark_gray]grey%c[default] -> %c[d_green]green%c[default] for how close the value is to max damage for this weapon/ammo/bone.
+			\n - %c[d_blue]vs Head Armor%c[default]: Same as %c[d_blue]vs Torso Armor%c[default], but vs real head armor values, and with the x3.65 headshot damage mult factored in.
 			\n
 			\n%c[d_green]Table notes%c[default]:
 			\n - Damage numbers are mainly a reflection of your opening salvo, as once an armor segment (head/torso+arms/legs) is broken, you will do near-full damage to that segment regardless of AP.
-			\n - Column headers can show short armor-class names (Min/Lgt/...) or the raw bone-armor floats used in the math.
+			\n - Column headers can show short armor-class names (Min/Lgt/...), the raw bone-armor floats used in the math, or those floats x100 floored to integers (e.g. 0.075 -> 7).
 			\n - avg_hit_fraction uses the average hit_fraction for profiles at that exact armor value only.
 			\n - Full armor-value list (including rare tiers skipped in the table) is under Useful Info section.
 			\n

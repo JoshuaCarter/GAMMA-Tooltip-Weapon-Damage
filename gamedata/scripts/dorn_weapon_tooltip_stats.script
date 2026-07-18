@@ -1,6 +1,6 @@
 --[[
-	Extra weapon stat rows for Dorn's Weapon Tooltip (Base Spread, Move Spread,
-	Bullet Wear, Burst Control, Bullet Drop). Loaded before
+	Extra weapon stat rows for Dorn's Weapon Tooltip (Dispersion, Base Spread,
+	Move Spread, Bullet Wear, Burst Size, Bullet Drop). Loaded before
 	zz_dorn_weapon_tooltip_main, which registers them in utils_ui.stats_table.
 
 	X-Ray binds this file's environment to global dorn_weapon_tooltip_stats.
@@ -19,8 +19,9 @@ local VEL_MAX = 10
 local SPEED_RUN = 5.0
 
 local GRAVITY = 9.81
+-- Shared MCM range for Dispersion (lateral) and Bullet Drop (vertical).
 local DROP_RANGE_M = 200
--- Tweakable: ADS camera kick angle (degrees) used for Burst Control.
+-- Tweakable: ADS camera kick angle (degrees) used for Burst Size.
 local RECOIL_KICK_THRESHOLD = 3.0
 
 function set_drop_range(m)
@@ -51,6 +52,7 @@ end
 
 -- String ids for the new rows (also used by main for white-text display).
 NAME = {
+	dispersion = "ui_dorn_wpn_dispersion",
 	base_spread = "ui_dorn_wpn_base_spread",
 	movement_spread = "ui_dorn_wpn_movement_spread",
 	weapon_wear = "ui_dorn_wpn_weapon_wear",
@@ -192,7 +194,7 @@ local function fmt_thr_deg(thr)
 end
 
 local function fmt_drop_m(v)
-	return string.format("%.2fm @%dm", v, DROP_RANGE_M)
+	return string.format("%.2fm %%c[dark_gray]@%dm%%c[default]", v, DROP_RANGE_M)
 end
 
 local function is_degraded_ammo(ammo_sec)
@@ -210,6 +212,21 @@ local function hip_spread_for_weapon(obj, sec, speed)
 	local pdm_vel = wpn_param(obj, sec, "PDM_disp_vel_factor", 1)
 	local actor = ACTOR_DISP_BASE * pdm_base * (1 + (speed / VEL_MAX) * ACTOR_DISP_VEL * pdm_vel)
 	return fire_disp + actor
+end
+
+-- Lateral miss distance from Base Spread angle at DROP_RANGE_M: d * tan(angle).
+function text_dispersion(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_section(sec) then
+		return nil
+	end
+	local v = wpn_param(obj, sec, "fire_dispersion_base", 0)
+	if v <= 0 then
+		log_once("dispersion_fail:" .. tostring(sec),
+			string.format("dispersion [%s]: fire_dispersion_base=%s", tostring(sec), tostring(v)))
+		return nil
+	end
+	return fmt_drop_m(DROP_RANGE_M * math.tan(math.rad(v)))
 end
 
 function text_base_spread(obj, sec)
@@ -288,6 +305,10 @@ function text_weapon_wear(obj, sec)
 end
 
 -- Fractional ADS shots until cumulative vertical camera climb reaches RECOIL_KICK_THRESHOLD.
+local function fmt_burst(shots_txt, thr)
+	return string.format("%s %%c[dark_gray]@ %s%%c[default]", shots_txt, fmt_thr_deg(thr))
+end
+
 function text_burst_control(obj, sec)
 	sec = resolve_sec(obj, sec)
 	if not is_weapon_section(sec) then
@@ -304,7 +325,7 @@ function text_burst_control(obj, sec)
 			"burst_control [%s]: no cam kick (zoom_cam_dispersion=%s cam_dispersion=%s)",
 			tostring(sec), tostring(zoom_disp), tostring(hip_disp)))
 		-- Still show a value — treat as effectively infinite control rather than n/a.
-		return string.format("%s @ >%d shots", fmt_thr_deg(RECOIL_KICK_THRESHOLD), 200)
+		return fmt_burst(string.format(">%d", 200), RECOIL_KICK_THRESHOLD)
 	end
 	local inc = wpn_param(obj, sec, "zoom_cam_dispersion_inc", 0)
 	if inc == 0 then
@@ -347,7 +368,7 @@ function text_burst_control(obj, sec)
 			if shots < 1 then
 				shots = 1
 			end
-			return string.format("%s @ %.1f shots", fmt_thr_deg(thr), shots)
+			return fmt_burst(string.format("%.1f", shots), thr)
 		end
 		if return_on and relax > 0 and dt > 0 then
 			angle = angle - relax * dt
@@ -356,7 +377,7 @@ function text_burst_control(obj, sec)
 			end
 		end
 	end
-	return string.format("%s @ >%d shots", fmt_thr_deg(thr), max_shots)
+	return fmt_burst(string.format(">%d", max_shots), thr)
 end
 
 function text_bullet_drop(obj, sec)
@@ -390,6 +411,7 @@ function text_bullet_drop(obj, sec)
 end
 
 local TEXT_BY_NAME = {
+	[NAME.dispersion] = text_dispersion,
 	[NAME.base_spread] = text_base_spread,
 	[NAME.movement_spread] = text_movement_spread,
 	[NAME.weapon_wear] = text_weapon_wear,
@@ -398,6 +420,7 @@ local TEXT_BY_NAME = {
 }
 
 local STAT_SHORT = {
+	[NAME.dispersion] = "dispersion",
 	[NAME.base_spread] = "base_spread",
 	[NAME.movement_spread] = "move_spread",
 	[NAME.weapon_wear] = "bullet_wear",
@@ -431,6 +454,12 @@ function text_for_name(name_id, obj, sec)
 end
 
 -- Sentinel props so utils_ui creates the row; real text is applied by main.
+function prop_dispersion(obj, sec)
+	if text_dispersion(obj, sec) then
+		return 1
+	end
+end
+
 function prop_base_spread(obj, sec)
 	if text_base_spread(obj, sec) then
 		return 1
