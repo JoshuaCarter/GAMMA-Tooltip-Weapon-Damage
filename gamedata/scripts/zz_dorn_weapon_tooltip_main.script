@@ -175,27 +175,19 @@ local function dmg_value_color(dmg, lo, hi)
 		math.floor(lerp(DMG_CLR_MIN[3], DMG_CLR_MAX[3], t)))
 end
 
--- Column header label: raw bone armor float (same value used in pen check).
-local function format_armor_label(armor)
-	if armor == 0 then
-		return "0"
-	end
-	local s = string.format("%.3f", armor)
-	return (s:gsub("0+$", ""):gsub("%.$", ""))
-end
-
--- Same armor value as integer (x100, floored).
-local function format_armor_label_x100(armor)
-	return string.format("%d", math.floor(armor * 100))
-end
-
 local function column_header_text(tier)
 	local mode = CONFIG.column_headers
 	if mode == "raw" then
-		return format_armor_label(tier.armor)
+		-- Raw bone armor float (same value used in the pen check).
+		local armor = tier.armor
+		if armor == 0 then
+			return "0"
+		end
+		local s = string.format("%.3f", armor)
+		return (s:gsub("0+$", ""):gsub("%.$", ""))
 	end
 	if mode == "raw100" then
-		return format_armor_label_x100(tier.armor)
+		return string.format("%d", math.floor(tier.armor * 100))
 	end
 	return tier.name
 end
@@ -326,13 +318,9 @@ local function ammo_type_rgb(label)
 	return (name and TYPE_RGB[name]) or TYPE_RGB.grey
 end
 
-local function ammo_type_color_code(label)
-	local name = AMMO_TYPE_COLOR[label]
-	return (name and TYPE_CODE[name]) or TYPE_CODE.grey
-end
-
 local function color_ammo_value(label, text)
-	return ammo_type_color_code(label) .. tostring(text)
+	local name = AMMO_TYPE_COLOR[label]
+	return ((name and TYPE_CODE[name]) or TYPE_CODE.grey) .. tostring(text)
 end
 
 local CLR = {
@@ -363,7 +351,7 @@ local function refresh_enhanced_stat_labels()
 	}
 end
 
-local function dorn_custom_stat_text(cap, obj, sec)
+local function custom_stat_text(cap, obj, sec)
 	if not cap then
 		return nil
 	end
@@ -435,7 +423,7 @@ local function apply_custom_stat_display(info, obj, sec)
 					ele.cap:SetTextColor(CLR.white)
 					ele.txt:SetTextColor(CLR.white)
 				else
-					local custom = dorn_custom_stat_text(cap, obj, sec)
+					local custom = custom_stat_text(cap, obj, sec)
 					if custom then
 						ele.cap:SetTextColor(CLR.white)
 						if cap == ENHANCED_STAT_LABELS.stalker_damage
@@ -782,16 +770,6 @@ local function read_legacy_enhanced_default()
 	return true
 end
 
-local function read_show_new_weapon_stats_default()
-	if not DORN or not DORN.mcm then
-		return true
-	end
-	if DORN.mcm.get(MOD_ID, "main/show_new_weapon_stats") ~= nil then
-		return DORN.mcm.bool(MOD_ID, "main/show_new_weapon_stats", true)
-	end
-	return read_legacy_enhanced_default()
-end
-
 local function read_new_stat_flag(key)
 	if not DORN or not DORN.mcm then
 		return true
@@ -799,7 +777,10 @@ local function read_new_stat_flag(key)
 	if DORN.mcm.get(MOD_ID, "main/" .. key) ~= nil then
 		return DORN.mcm.bool(MOD_ID, "main/" .. key, true)
 	end
-	return read_show_new_weapon_stats_default()
+	if DORN.mcm.get(MOD_ID, "main/show_new_weapon_stats") ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/show_new_weapon_stats", true)
+	end
+	return read_legacy_enhanced_default()
 end
 
 -- Legacy master / per-append keys seed the new child-row toggles when absent.
@@ -897,6 +878,7 @@ local tracked_infos = setmetatable({}, { __mode = "k" })
 local function on_option_change()
 	-- All MCM/palette work is optional - the per-ammo breakdown must keep working
 	-- even if DORN common failed to load, so nothing here is allowed to hard-fail.
+	local tostr = tostring
 	local prev_debug = CONFIG.debug_log
 	if DORN and DORN.mcm then
 		CONFIG.show_damage_table = DORN.mcm.bool(MOD_ID, "main/show_damage_table", true)
@@ -980,34 +962,31 @@ local function on_option_change()
 
 	log_once("config", string.format(
 		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s/%s place=%s headers=%s order=%s range=%s pellet%%=%s cond=%s/%s sil=%s",
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
-		tostring(CONFIG.show_mutant_damage),
-		tostring(CONFIG.show_accuracy), tostring(CONFIG.show_handling),
-		tostring(CONFIG.show_fire_rate), tostring(CONFIG.show_mag_size),
-		tostring(CONFIG.show_muzzle_velocity),
-		tostring(CONFIG.show_reliability), tostring(CONFIG.show_recoil),
-		tostring(CONFIG.show_dispersion), tostring(CONFIG.show_base_spread),
-		tostring(CONFIG.show_movement_spread),
-		tostring(CONFIG.show_weapon_wear), tostring(CONFIG.show_burst_control),
-		tostring(CONFIG.show_bullet_drop), tostring(CONFIG.stat_row_placement),
-		tostring(CONFIG.column_headers), tostring(CONFIG.ammo_order),
-		tostring(CONFIG.calc_range_m), tostring(CONFIG.pellet_hit_pct),
-		tostring(CONFIG.use_condition_table),
-		tostring(CONFIG.use_condition_stats), tostring(CONFIG.apply_silencer)))
-end
-
-local function first_number(str)
-	if not str then
-		return 0
-	end
-	return tonumber(str:match("[%-%d%.]+")) or 0
+		tostr(CONFIG.show_damage_table), tostr(CONFIG.show_hit_power),
+		tostr(CONFIG.show_mutant_damage),
+		tostr(CONFIG.show_accuracy), tostr(CONFIG.show_handling),
+		tostr(CONFIG.show_fire_rate), tostr(CONFIG.show_mag_size),
+		tostr(CONFIG.show_muzzle_velocity),
+		tostr(CONFIG.show_reliability), tostr(CONFIG.show_recoil),
+		tostr(CONFIG.show_dispersion), tostr(CONFIG.show_base_spread),
+		tostr(CONFIG.show_movement_spread),
+		tostr(CONFIG.show_weapon_wear), tostr(CONFIG.show_burst_control),
+		tostr(CONFIG.show_bullet_drop), tostr(CONFIG.stat_row_placement),
+		tostr(CONFIG.column_headers), tostr(CONFIG.ammo_order),
+		tostr(CONFIG.calc_range_m), tostr(CONFIG.pellet_hit_pct),
+		tostr(CONFIG.use_condition_table),
+		tostr(CONFIG.use_condition_stats), tostr(CONFIG.apply_silencer)))
 end
 
 local function gun_hit_power(obj, sec)
 	if obj and utils_item and utils_item.get_wpn_param then
 		return utils_item.get_wpn_param(obj, sec, "hit_power", 0) or 0
 	end
-	return first_number(SYS_GetParam(0, sec, "hit_power", "0"))
+	local str = SYS_GetParam(0, sec, "hit_power", "0")
+	if type(str) ~= "string" then
+		return 0
+	end
+	return tonumber(str:match("[%-%d%.]+")) or 0
 end
 
 local function is_degraded_ammo(sec)
@@ -1103,7 +1082,7 @@ local function raw_barrel_condition(obj)
 		return 1
 	end
 	for k, v in pairs(parts) do
-		if type(k) == "string" and string.find(k, "barrel") then
+		if type(k) == "string" and string.find(k, "barrel", 1, true) then
 			local n = tonumber(v)
 			if n then
 				return clamp(n / 100, 0, 1)
@@ -1149,18 +1128,14 @@ local function difficulty_mult()
 	return 1.0
 end
 
--- Display AP (k_ap x 1000) needed for CQC combat_ap to first penetrate 0.650 torso armor.
-local function ap_pen_display_max(silencer)
+local function ap_display_color(ap, silencer, label)
+	-- Display AP (k_ap x 1000) needed for CQC combat_ap to first penetrate 0.650 torso armor.
 	local dist_mult = dist_atten(AP_COLOR_REF_AIR, calc_range())
 	local k_ap_ltx = AP_COLOR_ARMOR * dist_mult
 		/ (K_AP_COMBAT_SCALE * AP_COLOR_AP_SCALE * AP_TAIL * difficulty_mult() * (silencer or 1))
-	return math.max(math.ceil(k_ap_ltx * AP_SCALE), 1)
-end
-
-local function ap_display_color(ap, silencer, label)
-	local hi = ap_pen_display_max(silencer)
+	local hi = math.max(math.ceil(k_ap_ltx * AP_SCALE), 1)
 	local t = clamp((tonumber(ap) or 0) / hi, 0, 1)
-	-- grey → this row's ammo Type color (FMJ yellow, AP orange, HP teal, …).
+	-- grey -> this row's ammo Type color (FMJ yellow, AP orange, HP teal, ...).
 	local hi_rgb = ammo_type_rgb(label)
 	return GetARGB(255,
 		math.floor(lerp(175, hi_rgb[1], t)),
@@ -1453,10 +1428,6 @@ local MUTANT_AMMO_MULT = {
 	["ammo_11.43x23_fmj_bad"] = 1.00,
 }
 
-local function mutant_ammo_mult(ammo_sec)
-	return MUTANT_AMMO_MULT[ammo_sec] or MUTANT_AMMO_MULT_DEFAULT
-end
-
 -- Per-ammo flesh damage vs a generic mutant (species mult 100%, no weak spot).
 -- Same ammo order as the damage table.
 format_raw_ammo_damage_slash = function(obj, sec)
@@ -1478,7 +1449,7 @@ format_raw_ammo_damage_slash = function(obj, sec)
 		local dmg = math.floor(
 			hit_power / dist_atten(r.air_res, dist)
 				* r.k_hit * r.pellets
-				* MUTANT_BASE_MULT * mutant_ammo_mult(r.sec)
+				* MUTANT_BASE_MULT * (MUTANT_AMMO_MULT[r.sec] or MUTANT_AMMO_MULT_DEFAULT)
 				* barrel * diff
 				* DAMAGE_SCALE + 0.5
 		)
@@ -2175,6 +2146,7 @@ local function on_actor_update()
 end
 
 function on_game_start()
+	local tostr = tostring
 	local loader = _G[DORN_COMMON_VERSION]
 	if loader then
 		DORN = loader.load(MOD_ID)
@@ -2193,8 +2165,8 @@ function on_game_start()
 
 	log_once("startup", string.format(
 		"loaded: dorn=%s, ui_hooks=%s, details_hook=%s, table=%s, hit=%s, mutant=%s, place=%s, stats_mod=%s",
-		tostring(DORN ~= nil), tostring(ui_hooks_ok), tostring(details_hook_ok),
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
-		tostring(CONFIG.show_mutant_damage), tostring(CONFIG.stat_row_placement),
-		tostring(dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.NAME ~= nil)))
+		tostr(DORN ~= nil), tostr(ui_hooks_ok), tostr(details_hook_ok),
+		tostr(CONFIG.show_damage_table), tostr(CONFIG.show_hit_power),
+		tostr(CONFIG.show_mutant_damage), tostr(CONFIG.stat_row_placement),
+		tostr(dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.NAME ~= nil)))
 end

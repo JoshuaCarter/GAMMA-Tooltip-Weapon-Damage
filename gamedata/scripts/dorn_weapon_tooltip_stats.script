@@ -186,32 +186,8 @@ local function fmt_deg(v)
 	return string.format("%.2f%s", v, DEG)
 end
 
-local function fmt_thr_deg(thr)
-	if thr == math.floor(thr) then
-		return string.format("%.0f%s", thr, DEG)
-	end
-	return string.format("%.1f%s", thr, DEG)
-end
-
 local function fmt_drop_m(v)
 	return string.format("%.2fm %%c[dark_gray]@%dm%%c[default]", v, DROP_RANGE_M)
-end
-
-local function is_degraded_ammo(ammo_sec)
-	return ammo_sec:find("bad", 1, true) ~= nil
-end
-
--- Engine: total hip cone = weapon fire_dispersion_base + actor PDM degrees
--- (Actor_Weapon.cpp). Move Spread uses normal run speed (not sprint).
-local function hip_spread_for_weapon(obj, sec, speed)
-	local fire_disp = wpn_param(obj, sec, "fire_dispersion_base", 0)
-	if fire_disp <= 0 then
-		return nil
-	end
-	local pdm_base = wpn_param(obj, sec, "PDM_disp_base", 1)
-	local pdm_vel = wpn_param(obj, sec, "PDM_disp_vel_factor", 1)
-	local actor = ACTOR_DISP_BASE * pdm_base * (1 + (speed / VEL_MAX) * ACTOR_DISP_VEL * pdm_vel)
-	return fire_disp + actor
 end
 
 -- Lateral miss distance from Base Spread angle at DROP_RANGE_M: d * tan(angle).
@@ -248,7 +224,17 @@ function text_movement_spread(obj, sec)
 	if not is_weapon_section(sec) then
 		return nil
 	end
-	local run = hip_spread_for_weapon(obj, sec, SPEED_RUN)
+	-- Engine: total hip cone = weapon fire_dispersion_base + actor PDM degrees
+	-- (Actor_Weapon.cpp). Move Spread uses normal run speed (not sprint).
+	local fire_disp = wpn_param(obj, sec, "fire_dispersion_base", 0)
+	local run = nil
+	if fire_disp > 0 then
+		local pdm_base = wpn_param(obj, sec, "PDM_disp_base", 1)
+		local pdm_vel = wpn_param(obj, sec, "PDM_disp_vel_factor", 1)
+		local actor = ACTOR_DISP_BASE * pdm_base
+			* (1 + (SPEED_RUN / VEL_MAX) * ACTOR_DISP_VEL * pdm_vel)
+		run = fire_disp + actor
+	end
 	if not run then
 		log_once("move_spread_fail:" .. tostring(sec), string.format(
 			"move_spread [%s]: run=%s fire_disp=%s",
@@ -276,7 +262,7 @@ function text_weapon_wear(obj, sec)
 	local n = 0
 	if ammo_list then
 		for _, ammo_sec in ipairs(ammo_list) do
-			if ini_sys:section_exist(ammo_sec) and not is_degraded_ammo(ammo_sec) then
+			if ini_sys:section_exist(ammo_sec) and ammo_sec:find("bad", 1, true) == nil then
 				local impair = ini_sys:r_float_ex(ammo_sec, "impair") or 1
 				sum = sum + dec * impair
 				n = n + 1
@@ -306,7 +292,13 @@ end
 
 -- Fractional ADS shots until cumulative vertical camera climb reaches RECOIL_KICK_THRESHOLD.
 local function fmt_burst(shots_txt, thr)
-	return string.format("%s %%c[dark_gray]@ %s%%c[default]", shots_txt, fmt_thr_deg(thr))
+	local thr_txt
+	if thr == math.floor(thr) then
+		thr_txt = string.format("%.0f%s", thr, DEG)
+	else
+		thr_txt = string.format("%.1f%s", thr, DEG)
+	end
+	return string.format("%s %%c[dark_gray]@ %s%%c[default]", shots_txt, thr_txt)
 end
 
 function text_burst_control(obj, sec)
@@ -451,41 +443,4 @@ function text_for_name(name_id, obj, sec)
 			string.format("%s [%s]: %s", short, sec_s, tostring(result)))
 	end
 	return result
-end
-
--- Sentinel props so utils_ui creates the row; real text is applied by main.
-function prop_dispersion(obj, sec)
-	if text_dispersion(obj, sec) then
-		return 1
-	end
-end
-
-function prop_base_spread(obj, sec)
-	if text_base_spread(obj, sec) then
-		return 1
-	end
-end
-
-function prop_movement_spread(obj, sec)
-	if text_movement_spread(obj, sec) then
-		return 1
-	end
-end
-
-function prop_weapon_wear(obj, sec)
-	if text_weapon_wear(obj, sec) then
-		return 1
-	end
-end
-
-function prop_burst_control(obj, sec)
-	if text_burst_control(obj, sec) then
-		return 1
-	end
-end
-
-function prop_bullet_drop(obj, sec)
-	if text_bullet_drop(obj, sec) then
-		return 1
-	end
 end
