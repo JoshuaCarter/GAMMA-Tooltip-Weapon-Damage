@@ -1,5 +1,5 @@
 --[[
-	Extra weapon stat rows for Dorn's Weapon Tooltip (Dispersion, Move Spread,
+	Extra weapon stat rows for Dorn's Weapon Tooltip (Base Spread, Move Spread,
 	Bullet Wear, Burst Control, Bullet Drop). Loaded before
 	zz_dorn_weapon_tooltip_main, which registers them in utils_ui.stats_table.
 
@@ -34,6 +34,19 @@ function set_drop_range(m)
 		n = 2000
 	end
 	DROP_RANGE_M = n
+end
+
+function set_burst_threshold(deg)
+	local n = tonumber(deg)
+	if not n then
+		return
+	end
+	if n < 1 then
+		n = 1
+	elseif n > 10 then
+		n = 10
+	end
+	RECOIL_KICK_THRESHOLD = n
 end
 
 -- String ids for the new rows (also used by main for white-text display).
@@ -168,17 +181,18 @@ end
 local DEG = string.char(176)
 
 local function fmt_deg(v)
-	if v < 10 then
-		return string.format("%.1f%s", v, DEG)
+	return string.format("%.2f%s", v, DEG)
+end
+
+local function fmt_thr_deg(thr)
+	if thr == math.floor(thr) then
+		return string.format("%.0f%s", thr, DEG)
 	end
-	return string.format("%.0f%s", v, DEG)
+	return string.format("%.1f%s", thr, DEG)
 end
 
 local function fmt_drop_m(v)
-	if v < 1 then
-		return string.format("-%.1fm @%dm", v, DROP_RANGE_M)
-	end
-	return string.format("-%.0fm @%dm", v, DROP_RANGE_M)
+	return string.format("%.2fm @%dm", v, DROP_RANGE_M)
 end
 
 local function is_degraded_ammo(ammo_sec)
@@ -290,7 +304,7 @@ function text_burst_control(obj, sec)
 			"burst_control [%s]: no cam kick (zoom_cam_dispersion=%s cam_dispersion=%s)",
 			tostring(sec), tostring(zoom_disp), tostring(hip_disp)))
 		-- Still show a value — treat as effectively infinite control rather than n/a.
-		return string.format(">%d shots", 200)
+		return string.format("%s @ >%d shots", fmt_thr_deg(RECOIL_KICK_THRESHOLD), 200)
 	end
 	local inc = wpn_param(obj, sec, "zoom_cam_dispersion_inc", 0)
 	if inc == 0 then
@@ -333,7 +347,7 @@ function text_burst_control(obj, sec)
 			if shots < 1 then
 				shots = 1
 			end
-			return string.format("%.1f shots", shots)
+			return string.format("%s @ %.1f shots", fmt_thr_deg(thr), shots)
 		end
 		if return_on and relax > 0 and dt > 0 then
 			angle = angle - relax * dt
@@ -342,7 +356,7 @@ function text_burst_control(obj, sec)
 			end
 		end
 	end
-	return string.format(">%d shots", max_shots)
+	return string.format("%s @ >%d shots", fmt_thr_deg(thr), max_shots)
 end
 
 function text_bullet_drop(obj, sec)

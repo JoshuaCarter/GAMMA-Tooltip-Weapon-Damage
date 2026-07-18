@@ -20,7 +20,7 @@
 
 	One row per ammo round (Type label from AMMO_TYPE_SHORT map; unknown = ????).
 	Type label color from AMMO_TYPE_COLOR (fallback grey).
-	AP column grey-to-orange. Shift columns via XML.
+	AP column grey-to-ammo-type color. Shift columns via XML.
 
 	This script is prefixed zz_ on purpose: G.A.M.M.A. Accurate Defense Values
 	rebuilds utils_ui.stats_table["weapon"] wholesale in ish_item_stats'
@@ -39,6 +39,7 @@
 
 	4. calc_range - assumed distance in meters for damage math (0-200, default 20).
 	   drop_range - Bullet Drop distance (100-2000, default 200).
+	   burst_threshold - Burst Control climb target in degrees (1-10, step 0.5, default 3).
 
 	5. use_condition_table / use_condition_stats - when on, apply CQC
 	   barrel-condition factors to the damage table / slash damage stats
@@ -51,22 +52,24 @@
 	7. show_hit_power / show_stalker_damage / show_mutant_damage - Hit Power,
 	   DMG vs Stalkers, and DMG vs Mutants rows (each on by default).
 
-	8. show_accuracy / show_handling / show_reliability / show_recoil /
-	   show_muzzle_velocity - base Momopate/vanilla rows (each on by default).
+	8. show_accuracy / show_handling / show_fire_rate / show_mag_size /
+	   show_max_range / show_muzzle_velocity / show_reliability / show_recoil -
+	   base Momopate/vanilla rows (each on by default).
 
 	9. Companion rows (MCM keys keep old names for saved settings):
-	   show_base_spread = Dispersion, show_movement_spread = Move Spread,
+	   show_base_spread = Base Spread, show_movement_spread = Move Spread,
 	   show_weapon_wear = Bullet Wear, show_burst_control, show_bullet_drop.
 	   Placement via stat_row_placement.
 
-	10. stat_row_placement - "inline" (under related base row) or "after"
-	   (Hit Power / DMG rows / companion rows as a block after Recoil Control).
+	10. stat_row_placement - "inline" (after related base row, or in that
+	   base row's slot when the base row is hidden), "start" (block at the
+	   top of the list), or "after" (block at the end of the list).
 
-	Development: rangefinder MCM toggle shows crosshair distance via DORN.dbg overlay.
+	Development: debug_overlay MCM toggle shows crosshair rangefinder via DORN.dbg overlay.
 ]]
 
 local MOD_ID = "dorn_weapon_tooltip"
-local DORN_COMMON_VERSION = "dorn_common_c62f913d" -- managed by sync-dorn-common.sh, do not hand-edit
+local DORN_COMMON_VERSION = "dorn_common_442e61f8" -- managed by sync-dorn-common.sh, do not hand-edit
 
 local DORN
 
@@ -77,6 +80,9 @@ local CONFIG = {
 	show_mutant_damage = true,
 	show_accuracy = true,
 	show_handling = true,
+	show_fire_rate = true,
+	show_mag_size = true,
+	show_max_range = true,
 	show_reliability = true,
 	show_recoil = true,
 	show_muzzle_velocity = true,
@@ -93,17 +99,21 @@ local CONFIG = {
 	use_condition_stats = false,
 	apply_silencer = true,
 	debug_log = false,
-	rangefinder = false,
+	debug_overlay = false,
 }
 
--- Companion-row sort indices for inline placement (under related Momopate/base
--- rows). "after" placement is computed from the highest non-Dorn weapon index.
-local EXTRA_STAT_INDEX_INLINE = {
-	base_spread = 1.5,
-	movement_spread = 2.5,
-	bullet_drop = 101.5,
-	weapon_wear = 103.5,
-	burst_control = 104.5,
+-- Canonical Momopate/vanilla weapon-row indices. Inline companions anchor to
+-- these even when the parent base row is MCM-hidden (drop-in replacement).
+local BASE_INDEX = {
+	accuracy = 1,
+	handling = 2,
+	damage = 3,
+	fire_rate = 4,
+	ammo_mag_size = 5,
+	max_range = 100,
+	speed = 101,
+	reliability = 103,
+	recoil = 104,
 }
 
 -- Fallback string ids if dorn_weapon_tooltip_stats failed to expose NAME.
@@ -122,7 +132,7 @@ local BUCK_SELF = "ammo_12x70_buck_self"
 
 -- k_ap is the raw armor-piercing coefficient. The ammo's own info card scales it
 -- x1000 (k_ap 0.01 -> "10"), so we match that here.
--- Displayed AP = k_ap * AP_SCALE. Color scale: grey at 0 → full orange at the
+-- Displayed AP = k_ap * AP_SCALE. Color scale: grey at 0 → full ammo Type color at the
 -- display AP needed to penetrate 0.650 torso bone armor (Max column) at calc_range.
 local AP_SCALE = 1000
 local AP_COLOR_ARMOR = 0.650
@@ -206,14 +216,14 @@ local function lerp(a, b, t)
 	return a + (b - a) * t
 end
 
--- Damage cells fade grey (least damage) to red (most damage). Scaled 1..max
+-- Damage cells fade grey (least damage) to green (most damage). Scaled 1..max
 -- across all rows in a section (torso or head) so identical numbers always
 -- share the same color and higher damage is always brighter than lower.
 -- Head uses its own max (headshots hit much harder than torso).
 -- gamma < 1 brightens the mid-range so the ramp reads as a smooth gradient.
 local DMG_COLOR_GAMMA = 0.75
 local DMG_CLR_MIN = { 135, 135, 135 }
-local DMG_CLR_MAX = { 255, 64, 64 }
+local DMG_CLR_MAX = { 64, 255, 64 }
 local function dmg_value_color(dmg, lo, hi)
 	local span = hi - lo
 	local t = (span > 0) and clamp((dmg - lo) / span, 0, 1) or 1
@@ -352,6 +362,11 @@ end
 local function ammo_type_color(label)
 	local name = AMMO_TYPE_COLOR[label]
 	return (name and TYPE_ARGB[name]) or TYPE_ARGB.grey
+end
+
+local function ammo_type_rgb(label)
+	local name = AMMO_TYPE_COLOR[label]
+	return (name and TYPE_RGB[name]) or TYPE_RGB.grey
 end
 
 local function ammo_type_color_code(label)
@@ -615,9 +630,28 @@ local function max_non_dorn_weapon_index(weapon_stats)
 	return max_i
 end
 
+-- Resolve a base row's sort index from the cached stock def (survives MCM hide).
+local function resolved_base_index(key)
+	local saved = saved_base_stats[key]
+	if saved and saved.index then
+		return saved.index
+	end
+	return BASE_INDEX[key] or 0
+end
+
+-- Inline: sit under the parent when it is visible; take its index when hidden
+-- so companions remain drop-in replacements for their related base rows.
+local function inline_companion_index(parent_key, parent_shown)
+	local parent_idx = resolved_base_index(parent_key)
+	if parent_shown then
+		return parent_idx + 0.5
+	end
+	return parent_idx
+end
+
 local function placement_indices(weapon_stats)
 	if CONFIG.stat_row_placement == "after" then
-		-- Block after Accuracy…Recoil Control (and any other non-Dorn rows).
+		-- Block at end of list (after remaining non-Dorn rows).
 		local base = max_non_dorn_weapon_index(weapon_stats)
 		return {
 			hit_power = base + 1,
@@ -630,16 +664,31 @@ local function placement_indices(weapon_stats)
 			burst_control = base + 8,
 		}
 	end
-	-- Inline: Hit Power fills ADV's unused index 3 (between Handling and Fire Rate).
+
+	if CONFIG.stat_row_placement == "start" then
+		-- Block at start of list (before Accuracy / any non-Dorn rows).
+		return {
+			hit_power = 0.1,
+			stalker_damage = 0.2,
+			mutant_damage = 0.3,
+			base_spread = 0.4,
+			movement_spread = 0.5,
+			bullet_drop = 0.6,
+			weapon_wear = 0.7,
+			burst_control = 0.8,
+		}
+	end
+
+	local dmg_idx = resolved_base_index("damage")
 	return {
-		hit_power = 3,
-		stalker_damage = 3.25,
-		mutant_damage = 3.5,
-		base_spread = EXTRA_STAT_INDEX_INLINE.base_spread,
-		movement_spread = EXTRA_STAT_INDEX_INLINE.movement_spread,
-		bullet_drop = EXTRA_STAT_INDEX_INLINE.bullet_drop,
-		weapon_wear = EXTRA_STAT_INDEX_INLINE.weapon_wear,
-		burst_control = EXTRA_STAT_INDEX_INLINE.burst_control,
+		hit_power = dmg_idx,
+		stalker_damage = dmg_idx + 0.25,
+		mutant_damage = dmg_idx + 0.5,
+		base_spread = inline_companion_index("accuracy", CONFIG.show_accuracy),
+		movement_spread = inline_companion_index("handling", CONFIG.show_handling),
+		bullet_drop = inline_companion_index("speed", CONFIG.show_muzzle_velocity),
+		weapon_wear = inline_companion_index("reliability", CONFIG.show_reliability),
+		burst_control = inline_companion_index("recoil", CONFIG.show_recoil),
 	}
 end
 
@@ -653,8 +702,16 @@ local function apply_enhanced_weapon_stats()
 		return
 	end
 
+	-- Cache every known base row first so inline anchors survive MCM hide.
+	for key, _ in pairs(BASE_INDEX) do
+		cache_base_stat(weapon_stats, key)
+	end
+
 	set_base_stat(weapon_stats, "accuracy", CONFIG.show_accuracy)
 	set_base_stat(weapon_stats, "handling", CONFIG.show_handling)
+	set_base_stat(weapon_stats, "fire_rate", CONFIG.show_fire_rate)
+	set_base_stat(weapon_stats, "ammo_mag_size", CONFIG.show_mag_size)
+	set_base_stat(weapon_stats, "max_range", CONFIG.show_max_range)
 	set_base_stat(weapon_stats, "reliability", CONFIG.show_reliability)
 	set_base_stat(weapon_stats, "recoil", CONFIG.show_recoil)
 	set_base_stat(weapon_stats, "speed", CONFIG.show_muzzle_velocity)
@@ -796,6 +853,21 @@ end
 
 local logged_once = {}
 
+local OVERLAY = {
+	RANGE = { order = 1, color = "cyan" },
+}
+
+-- HUD-only: for values that change every frame (crosshair range).
+local function overlay(slot, msg)
+	if not (DORN and DORN.dbg) then
+		return
+	end
+	if CONFIG.debug_overlay then
+		local s = slot or OVERLAY.RANGE
+		DORN.dbg.overlay(MOD_ID, s.order, tostring(msg), s.color)
+	end
+end
+
 local function log(msg)
 	if not (DORN and DORN.dbg) then
 		return
@@ -839,6 +911,9 @@ local function on_option_change()
 		CONFIG.show_mutant_damage = read_new_stat_flag("show_mutant_damage")
 		CONFIG.show_accuracy = read_base_stat_flag("show_accuracy")
 		CONFIG.show_handling = read_base_stat_flag("show_handling")
+		CONFIG.show_fire_rate = read_base_stat_flag("show_fire_rate")
+		CONFIG.show_mag_size = read_base_stat_flag("show_mag_size")
+		CONFIG.show_max_range = read_base_stat_flag("show_max_range")
 		CONFIG.show_reliability = read_base_stat_flag("show_reliability")
 		CONFIG.show_recoil = read_base_stat_flag("show_recoil")
 		CONFIG.show_muzzle_velocity = read_base_stat_flag("show_muzzle_velocity")
@@ -866,6 +941,8 @@ local function on_option_change()
 		local place = DORN.mcm.string(MOD_ID, "main/stat_row_placement", "inline")
 		if place == "after" then
 			CONFIG.stat_row_placement = "after"
+		elseif place == "start" then
+			CONFIG.stat_row_placement = "start"
 		else
 			CONFIG.stat_row_placement = "inline"
 		end
@@ -874,19 +951,27 @@ local function on_option_change()
 		if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.set_drop_range then
 			dorn_weapon_tooltip_stats.set_drop_range(drop_range)
 		end
+		local burst_threshold = clamp(DORN.mcm.number(MOD_ID, "main/burst_threshold", 3), 1, 10)
+		if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.set_burst_threshold then
+			dorn_weapon_tooltip_stats.set_burst_threshold(burst_threshold)
+		end
 		CONFIG.use_condition_table = DORN.mcm.bool(MOD_ID, "main/use_condition_table", false)
 		CONFIG.use_condition_stats = DORN.mcm.bool(MOD_ID, "main/use_condition_stats", false)
 		CONFIG.apply_silencer = DORN.mcm.bool(MOD_ID, "main/apply_silencer", true)
 		CONFIG.debug_log = DORN.mcm.bool(MOD_ID, "development/debug_log", false)
-		CONFIG.rangefinder = DORN.mcm.bool(MOD_ID, "development/rangefinder", false)
+		CONFIG.debug_overlay = DORN.mcm.bool(MOD_ID, "development/debug_overlay", false)
+		-- Legacy: early builds used development/rangefinder for this toggle.
+		if not CONFIG.debug_overlay and DORN.mcm.bool(MOD_ID, "development/rangefinder", false) then
+			CONFIG.debug_overlay = true
+		end
 	end
 
 	if CONFIG.debug_log and not prev_debug then
 		logged_once = {}
 	end
 
-	if DORN and DORN.dbg and DORN.dbg.set_enabled then
-		DORN.dbg.set_enabled(MOD_ID, CONFIG.rangefinder)
+	if DORN and DORN.dbg then
+		DORN.dbg.set_enabled(MOD_ID, CONFIG.debug_overlay)
 	end
 
 	refresh_enhanced_stat_labels()
@@ -897,12 +982,13 @@ local function on_option_change()
 	end
 
 	log_once("config", string.format(
-		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s place=%s headers=%s order=%s range=%s cond=%s/%s sil=%s",
+		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s place=%s headers=%s order=%s range=%s cond=%s/%s sil=%s",
 		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
 		tostring(CONFIG.show_mutant_damage),
 		tostring(CONFIG.show_accuracy), tostring(CONFIG.show_handling),
+		tostring(CONFIG.show_fire_rate), tostring(CONFIG.show_mag_size),
+		tostring(CONFIG.show_max_range), tostring(CONFIG.show_muzzle_velocity),
 		tostring(CONFIG.show_reliability), tostring(CONFIG.show_recoil),
-		tostring(CONFIG.show_muzzle_velocity),
 		tostring(CONFIG.show_base_spread), tostring(CONFIG.show_movement_spread),
 		tostring(CONFIG.show_weapon_wear), tostring(CONFIG.show_burst_control),
 		tostring(CONFIG.show_bullet_drop), tostring(CONFIG.stat_row_placement),
@@ -1065,14 +1151,15 @@ local function ap_pen_display_max(silencer)
 	return math.max(math.ceil(k_ap_ltx * AP_SCALE), 1)
 end
 
-local function ap_display_color(ap, silencer)
+local function ap_display_color(ap, silencer, label)
 	local hi = ap_pen_display_max(silencer)
 	local t = clamp((tonumber(ap) or 0) / hi, 0, 1)
-	-- grey (175,175,175) → orange (255,150,0); matches TYPE_RGB.orange.
+	-- grey → this row's ammo Type color (FMJ yellow, AP orange, HP teal, …).
+	local hi_rgb = ammo_type_rgb(label)
 	return GetARGB(255,
-		math.floor(lerp(175, 255, t)),
-		math.floor(lerp(175, 150, t)),
-		math.floor(lerp(175, 0, t)))
+		math.floor(lerp(175, hi_rgb[1], t)),
+		math.floor(lerp(175, hi_rgb[2], t)),
+		math.floor(lerp(175, hi_rgb[3], t)))
 end
 
 -- CQC NPC ammo_mult (only 7.62x25 P is special).
@@ -1297,7 +1384,7 @@ local function build_ammo_damage_rows(obj, sec)
 		return nil
 	end
 
-	-- Shared color scale per section: 1 (grey) .. max damage (bright red).
+	-- Shared color scale per section: 1 (grey) .. max damage (bright green).
 	local torso_hi = section_dmg_max(rows, "torso")
 	local head_hi = section_dmg_max(rows, "head")
 	local ordered = {}
@@ -1607,7 +1694,7 @@ local function populate_damage_fields(fields, data, panel_width)
 			row.type:SetText(rd.type or "")
 			row.type:SetTextColor(ammo_type_color(rd.type))
 			row.ap:SetText(rd.ap or "")
-			row.ap:SetTextColor(ap_display_color(rd.ap_val or 0, data.silencer))
+			row.ap:SetTextColor(ap_display_color(rd.ap_val or 0, data.silencer, rd.type))
 			for t = 1, NUM_TORSO_TIERS do
 				set_damage_cell(row.torso[t], rd.torso and rd.torso[t], rd.torso_lo, rd.torso_hi)
 			end
@@ -2051,10 +2138,14 @@ local function crosshair_range_m()
 end
 
 local function on_actor_update()
-	if not CONFIG.rangefinder then
+	if not DORN or not DORN.sys then
 		return
 	end
-	if not (DORN and DORN.dbg and DORN.dbg.overlay) then
+	local _, actor = DORN.sys.ready(MOD_ID, db, on_option_change)
+	if not actor then
+		return
+	end
+	if not CONFIG.debug_overlay then
 		return
 	end
 	local dist = crosshair_range_m()
@@ -2068,7 +2159,7 @@ local function on_actor_update()
 	else
 		msg = string.format("Range  >%dm", RANGEFINDER_MAX_M)
 	end
-	DORN.dbg.overlay(MOD_ID, 1, msg, "cyan")
+	overlay(OVERLAY.RANGE, msg)
 end
 
 function on_game_start()

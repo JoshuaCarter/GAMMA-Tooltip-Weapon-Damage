@@ -1,5 +1,5 @@
 -- dorn_mcm_banner:begin (managed by sync-dorn-common.sh)
-local DORN_COMMON_VERSION = "dorn_common_c62f913d"
+local DORN_COMMON_VERSION = "dorn_common_442e61f8"
 local function dorn_mcm()
 	local hash = DORN_COMMON_VERSION:match("dorn_common_(.+)$")
 	return _G["dorn_mcm_" .. hash]
@@ -55,6 +55,16 @@ function on_mcm_load()
 						hint = "dorn_weapon_tooltip_drop_range",
 					},
 					{
+						id = "burst_threshold",
+						type = "track",
+						val = 2,
+						min = 1,
+						max = 10,
+						step = 0.5,
+						def = 3,
+						hint = "dorn_weapon_tooltip_burst_threshold",
+					},
+					{
 						id = "apply_silencer",
 						type = "check",
 						val = 1,
@@ -69,6 +79,7 @@ function on_mcm_load()
 						hint = "dorn_weapon_tooltip_stat_row_placement",
 						content = {
 							{ "inline", "inline" },
+							{ "start", "start" },
 							{ "after", "after" },
 						},
 					},
@@ -188,6 +199,27 @@ function on_mcm_load()
 						hint = "dorn_weapon_tooltip_show_handling",
 					},
 					{
+						id = "show_fire_rate",
+						type = "check",
+						val = 1,
+						def = true,
+						hint = "dorn_weapon_tooltip_show_fire_rate",
+					},
+					{
+						id = "show_mag_size",
+						type = "check",
+						val = 1,
+						def = true,
+						hint = "dorn_weapon_tooltip_show_mag_size",
+					},
+					{
+						id = "show_max_range",
+						type = "check",
+						val = 1,
+						def = true,
+						hint = "dorn_weapon_tooltip_show_max_range",
+					},
+					{
 						id = "show_muzzle_velocity",
 						type = "check",
 						val = 1,
@@ -273,11 +305,11 @@ function on_mcm_load()
 						hint = "dorn_weapon_tooltip_debug_log",
 					},
 					{
-						id = "rangefinder",
+						id = "debug_overlay",
 						type = "check",
 						val = 1,
 						def = false,
-						hint = "dorn_weapon_tooltip_rangefinder",
+						hint = "dorn_weapon_tooltip_debug_overlay",
 					},
 				}),
 			},
