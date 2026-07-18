@@ -7,20 +7,19 @@
 	XML; the script only fills the dynamic number cells (each number is its own
 	cell) and shows/hides rows. No icons - the type label carries the color.
 
-	    DAMAGE:              Dmg vs Torso (BRC)      Dmg vs Head (BRC)
-	    Type  AP 10 20 30 40 50 60  10 20 30 35 45
-	    AP    51  .. .. .. .. .. ..    .. .. .. .. .. ..
-	    FMJ   20  .. .. .. .. .. ..    .. .. .. .. .. ..
+	    DAMAGE:              vs Torso                              vs Head
+	    Type  AP Min Lit Lit+ Med Med+ Hvy Hvy+ Exo Max  Min Lit Med Hvy Max
+	    AP    51  ..  ..   ..  ..   ..  ..   ..  ..  ..   ..  ..  ..  ..  ..
+	    FMJ   20  ..  ..   ..  ..   ..  ..   ..  ..  ..   ..  ..  ..  ..  ..
 
 	where
 	    AP <n>    = ammo k_ap x 1000 (matches the ammo's own info card),
-	    10..60    = six armor tiers (actor_armor_class0..5 + matched helmet).
-	                Damage always uses grok_bo NPC bone armor for penetration.
-	                BRC headers use the GAMMA tier scale (10-60, same as ammo
-	                card BR1-BR6); NPC % headers show the bone values used in calc.
+	    columns   = named prevalent NPC bone-armor floats (combat_ap >= armor).
+	                Failed-pen chip uses the average hit_fraction for that
+	                exact armor only.
 
 	One row per ammo round (label from inv_name_short, calibre prefix stripped).
-	AP column grey-to-yellow (display AP 1-100). Shift columns via XML.
+	AP column grey-to-yellow. Shift columns via XML.
 
 	This script is prefixed zz_ on purpose: G.A.M.M.A. Accurate Defense Values
 	rebuilds utils_ui.stats_table["weapon"] wholesale in ish_item_stats'
@@ -32,8 +31,25 @@
 
 	1. show_damage_table - per-ammo DAMAGE panel below the description (on by default).
 
-	2. show_enhanced_weapon_stats - Hit Power + raw Damage Per Ammo stat rows and
-	   real-value appends on Accuracy/Handling/Reliability/Recoil/Muzzle Velocity.
+	2. column_headers - "names" (Min/Lit/...) or "raw" (0.011/0.075/...).
+
+	3. ammo_order - "damage" (dmg desc, AP asc) or "ap" (AP desc).
+
+	4. calc_range - assumed distance in meters for damage math (0-200, default 20).
+
+	5. use_condition_table / use_condition_stats - when on, apply GBOOBS
+	   barrel-condition factors to the damage table / slash damage stats
+	   (off = assume 100%).
+
+	6. show_hit_power / show_stalker_damage / show_mutant_damage - Hit Power,
+	   Stalker Damage, and Mutant Damage rows (each on by default).
+
+	7. show_accuracy / show_handling / show_reliability / show_recoil /
+	   show_muzzle_velocity - base Momopate/vanilla rows (each on by default).
+
+	8. show_base_spread / show_movement_spread / show_weapon_wear /
+	   show_burst_control / show_bullet_drop - new rows under the related base
+	   stat (each on by default).
 ]]
 
 local MOD_ID = "dorn_weapon_tooltip"
@@ -43,8 +59,24 @@ local DORN
 
 local CONFIG = {
 	show_damage_table = true,
-	show_enhanced_weapon_stats = true,
-	column_headers = "brc",
+	show_hit_power = true,
+	show_stalker_damage = true,
+	show_mutant_damage = true,
+	show_accuracy = true,
+	show_handling = true,
+	show_reliability = true,
+	show_recoil = true,
+	show_muzzle_velocity = true,
+	show_base_spread = true,
+	show_movement_spread = true,
+	show_weapon_wear = true,
+	show_burst_control = true,
+	show_bullet_drop = true,
+	column_headers = "names",
+	ammo_order = "damage",
+	calc_range_m = 20,
+	use_condition_table = false,
+	use_condition_stats = false,
 	debug_log = false,
 }
 
@@ -62,39 +94,49 @@ local AP_COLOR_LO = 1
 local AP_COLOR_REF_AIR = 0.05
 local REF_DIST_M = 20
 
--- Six tiers from actor_armor_class0..5 (NPC bone armor + ap_scale) with matched
--- actor_helm_* head profiles. Penetration always uses torso/head bone armor
--- (grok_bo). brc_torso/brc_head are the GAMMA tier labels (10-60, same scale
--- as ammo-card BR1-BR6); each tier row is one armor class, not a separate calc.
--- hit_frac = chip damage when a round fails to penetrate (approximation).
--- Source: G.A.M.M.A. Outfits Balances/gamedata/configs/creatures/damages.ltx
-local BRC_TIERS = {
-	-- torso/head = NPC bone armor; brc_* = player outfit br_class; hit_frac
-	{ torso = 0.011, torso_ap = 1.00, head = 0.0,   head_ap = 1.00, hit_frac = 0.65, brc_torso = 10, brc_head = 0 },
-	{ torso = 0.080, torso_ap = 0.96, head = 0.030, head_ap = 1.00, hit_frac = 0.50, brc_torso = 20, brc_head = 10 },
-	{ torso = 0.150, torso_ap = 0.92, head = 0.150, head_ap = 0.90, hit_frac = 0.40, brc_torso = 30, brc_head = 20 },
-	{ torso = 0.300, torso_ap = 0.82, head = 0.300, head_ap = 0.78, hit_frac = 0.28, brc_torso = 40, brc_head = 30 },
-	{ torso = 0.360, torso_ap = 0.72, head = 0.350, head_ap = 0.75, hit_frac = 0.20, brc_torso = 50, brc_head = 35 },
-	{ torso = 0.440, torso_ap = 0.67, head = 0.450, head_ap = 0.67, hit_frac = 0.14, brc_torso = 60, brc_head = 45 },
+-- Named NPC bone-armor columns from visual profiles (see npc_visual_armor_reference.md).
+-- Only named floats are shown; rare 1-2 profile cliffs (0.125/0.300/0.350/0.430) are skipped.
+-- hit_frac / ap_scale are averages across profiles that share that exact armor
+-- value (chip is never blended across other tiers). `name` is the short class
+-- label used when MCM column_headers = "names".
+local TORSO_TIERS = {
+	{ armor = 0.011, ap_scale = 0.8889, hit_frac = 0.8500, name = "Min" },
+	{ armor = 0.075, ap_scale = 0.8562, hit_frac = 0.6250, name = "Lit" },
+	{ armor = 0.100, ap_scale = 0.7955, hit_frac = 0.5000, name = "Lit+" },
+	{ armor = 0.150, ap_scale = 0.8117, hit_frac = 0.4783, name = "Med" },
+	{ armor = 0.200, ap_scale = 0.7412, hit_frac = 0.3618, name = "Med+" },
+	{ armor = 0.250, ap_scale = 0.7400, hit_frac = 0.3050, name = "Hvy" },
+	{ armor = 0.400, ap_scale = 0.7500, hit_frac = 0.2000, name = "Hvy+" },
+	{ armor = 0.550, ap_scale = 0.7000, hit_frac = 0.1500, name = "Exo" },
+	{ armor = 0.650, ap_scale = 0.7000, hit_frac = 0.1500, name = "Max" },
 }
-local NUM_TIERS = #BRC_TIERS
-local NUM_HEAD_TIERS = NUM_TIERS - 1  -- skip brc_head 0 (same practical result as 10)
-local HEAD_TIER_START = 2
-
--- grok_bo difficulty_multiplier keyed by diff_game.type (ZCP Easy/Medium/Hard = 1/2/3).
--- Type 4 (0.80) exists in GBO but is not offered in GAMMA character creation.
-local DIFFICULTY_MULT = {
-	[1] = 1.30, -- Easy
-	[2] = 1.05, -- Medium
-	[3] = 0.90, -- Hard
-	[4] = 0.80, -- unused Hardcore leftover
+local HEAD_TIERS = {
+	-- Bare head: no bone armor, always full damage (hit_frac unused / forced pen).
+	{ armor = 0.000, ap_scale = 0.8096, hit_frac = 0,      name = "Min" },
+	{ armor = 0.150, ap_scale = 0.7571, hit_frac = 0.4071, name = "Lit" },
+	{ armor = 0.200, ap_scale = 0.7861, hit_frac = 0.4389, name = "Med" },
+	{ armor = 0.300, ap_scale = 0.7621, hit_frac = 0.3431, name = "Hvy" },
+	{ armor = 0.350, ap_scale = 0.7000, hit_frac = 0.1500, name = "Max" },
 }
+local NUM_TORSO_TIERS = #TORSO_TIERS
+local NUM_HEAD_TIERS = #HEAD_TIERS
 
-local BONE_DMG_TORSO = 0.9   -- bip01_spine (grok_bo stalker_damage)
-local BONE_DMG_HEAD  = 3.65  -- bip01_head
+-- Live combat math follows GBOOBS grok_bo (overwrites CQC in the modlist):
+-- no k_ap x10, no final x0.80 AP tail.
+-- Bone mults from GBOOBS stalker_damage (not CQC's 0.9 / 3.65).
+-- Difficulty mult matches CQC/GAMMA diff_game type (GBOOBS dropped it; we still
+-- apply it so tooltip numbers track the MCM Important Notes).
+local BONE_DMG_TORSO = 1.0   -- bip01_spine
+local BONE_DMG_HEAD  = 4.0   -- bip01_head
 local GBOOBS_BONUS   = 1.1
-local AP_COMBAT_TAIL = 0.80  -- grok_bo final k_ap scale
-local HEAD_AP_BOOST  = 0.040
+local DIFFICULTY_MULT = {
+	[1] = 1.3,
+	[2] = 1.05,
+	[3] = 0.90,
+	[4] = 0.80,
+}
+-- GBOOBS only adds head AP on eyes/eyelid (bone 16-18), not bip01_head.
+-- Our "vs Head" columns model bip01_head, so no AP boost.
 
 local function clamp(v, lo, hi)
 	if v < lo then
@@ -128,8 +170,13 @@ local function dmg_value_color(dmg, lo, hi)
 		math.floor(lerp(DMG_CLR_MIN[3], DMG_CLR_MAX[3], t)))
 end
 
-local function format_npc_armor_pct(armor)
-	return tostring(math.floor(armor * 100 + 0.5))
+-- Column header label: raw bone armor float (same value used in pen check).
+local function format_armor_label(armor)
+	if armor == 0 then
+		return "0"
+	end
+	local s = string.format("%.3f", armor)
+	return (s:gsub("0+$", ""):gsub("%.$", ""))
 end
 
 -- Round label from GAMMA inv_name_short, with the leading calibre stripped
@@ -203,42 +250,79 @@ local CLR = {
 
 -- Forward-declared here so the display helpers below capture these as upvalues.
 local format_raw_ammo_damage_slash
+local format_stalker_ammo_damage_slash
 
 local ENHANCED_STAT_LABELS = {}
 
 local function refresh_enhanced_stat_labels()
 	ENHANCED_STAT_LABELS = {
 		hit_power = game.translate_string("ui_dorn_wpn_hit_power"),
+		stalker_damage = game.translate_string("ui_dorn_wpn_stalker_damage"),
 		ammo_damage = game.translate_string("ui_dorn_wpn_ammo_torso"),
+		base_spread = game.translate_string("ui_dorn_wpn_base_spread"),
+		movement_spread = game.translate_string("ui_dorn_wpn_movement_spread"),
+		weapon_wear = game.translate_string("ui_dorn_wpn_weapon_wear"),
+		burst_control = game.translate_string("ui_dorn_wpn_burst_control"),
+		bullet_drop = game.translate_string("ui_dorn_wpn_bullet_drop"),
 	}
 end
 
+local function dorn_custom_stat_text(cap, obj, sec)
+	if not cap then
+		return nil
+	end
+	if CONFIG.show_stalker_damage and cap == ENHANCED_STAT_LABELS.stalker_damage then
+		return format_stalker_ammo_damage_slash(obj, sec)
+	end
+	if CONFIG.show_mutant_damage and cap == ENHANCED_STAT_LABELS.ammo_damage then
+		return format_raw_ammo_damage_slash(obj, sec)
+	end
+	if not dorn_weapon_tooltip_stats or not dorn_weapon_tooltip_stats.text_for_name then
+		return nil
+	end
+	local S = dorn_weapon_tooltip_stats
+	local N = S.NAME
+	if CONFIG.show_base_spread and cap == ENHANCED_STAT_LABELS.base_spread then
+		return S.text_for_name(N.base_spread, obj, sec)
+	end
+	if CONFIG.show_movement_spread and cap == ENHANCED_STAT_LABELS.movement_spread then
+		return S.text_for_name(N.movement_spread, obj, sec)
+	end
+	if CONFIG.show_weapon_wear and cap == ENHANCED_STAT_LABELS.weapon_wear then
+		return S.text_for_name(N.weapon_wear, obj, sec)
+	end
+	if CONFIG.show_burst_control and cap == ENHANCED_STAT_LABELS.burst_control then
+		return S.text_for_name(N.burst_control, obj, sec)
+	end
+	if CONFIG.show_bullet_drop and cap == ENHANCED_STAT_LABELS.bullet_drop then
+		return S.text_for_name(N.bullet_drop, obj, sec)
+	end
+	return nil
+end
+
 local function apply_custom_stat_display(info, obj, sec)
-	if not info or not info.stats or not CONFIG.show_enhanced_weapon_stats then
+	if not info or not info.stats then
 		return
 	end
-
-	local raw_slash = (obj and sec) and format_raw_ammo_damage_slash(obj, sec)
 
 	for _, ele in pairs(info.stats) do
 		if ele.cap and ele.txt then
 			local cap = ele.cap:GetText()
 			if cap then
-				if cap == ENHANCED_STAT_LABELS.hit_power then
+				if CONFIG.show_hit_power and cap == ENHANCED_STAT_LABELS.hit_power then
 					ele.cap:SetTextColor(CLR.white)
 					ele.txt:SetTextColor(CLR.white)
-				elseif cap == ENHANCED_STAT_LABELS.ammo_damage and raw_slash then
-					ele.cap:SetTextColor(CLR.white)
-					ele.txt:SetText(raw_slash)
-					ele.txt:Show(true)
-					ele.txt:SetTextColor(CLR.white)
+				else
+					local custom = dorn_custom_stat_text(cap, obj, sec)
+					if custom then
+						ele.cap:SetTextColor(CLR.white)
+						ele.txt:SetText(custom)
+						ele.txt:Show(true)
+						ele.txt:SetTextColor(CLR.white)
+					end
 				end
 			end
 		end
-	end
-
-	if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.apply_to_tooltip then
-		dorn_weapon_tooltip_stats.apply_to_tooltip(info, obj, sec)
 	end
 end
 
@@ -285,9 +369,11 @@ local HIT_POWER_STAT = {
 	},
 }
 
--- Max damage (hit_power x k_hit x pellets x difficulty) per ammo type, table order.
+-- Flesh (mutant) damage per ammo type, table order: hit_power / range x k_hit x
+-- pellets x GBOOBS mutant_mult 0.90 x ammo_mult x difficulty.
+-- No species or weak-spot factors.
 local RAW_AMMO_DAMAGE_STAT = {
-	index = 302,
+	index = 3.5,
 	typ = "float",
 	name = "ui_dorn_wpn_ammo_torso",
 	icon_p = "ui_wp_prop_damage",
@@ -301,6 +387,66 @@ local RAW_AMMO_DAMAGE_STAT = {
 	value_functor = { "zz_dorn_weapon_tooltip_main", "prop_raw_ammo_damage_slash_flag" },
 }
 
+-- Pre-armor stalker (NPC) torso damage per ammo at calc_range(): GBOOBS power
+-- before AP/armor/chip. Outfit ap_scale omitted (1.0) so this is universal max
+-- before armor math. Same ammo order as the damage table.
+local STALKER_DAMAGE_STAT = {
+	index = 3.25,
+	typ = "float",
+	name = "ui_dorn_wpn_stalker_damage",
+	icon_p = "ui_wp_prop_damage",
+	icon_n = "",
+	track = false,
+	magnitude = 1,
+	unit = "",
+	compare = false,
+	sign = false,
+	show_always = true,
+	value_functor = { "zz_dorn_weapon_tooltip_main", "prop_stalker_ammo_damage_slash_flag" },
+}
+
+-- Cached non-Dorn base rows so MCM can hide/restore them.
+local saved_base_stats = {}
+
+local function is_dorn_stat_def(gr)
+	return gr and gr.name and string.find(gr.name, "ui_dorn_wpn_", 1, true) == 1
+end
+
+local function cache_base_stat(weapon_stats, key)
+	local cur = weapon_stats[key]
+	if cur and not is_dorn_stat_def(cur) then
+		saved_base_stats[key] = cur
+	end
+end
+
+local function set_base_stat(weapon_stats, key, enabled)
+	cache_base_stat(weapon_stats, key)
+	if enabled then
+		if saved_base_stats[key] then
+			weapon_stats[key] = saved_base_stats[key]
+		end
+	else
+		weapon_stats[key] = nil
+	end
+end
+
+local function make_dorn_row(index, name, icon, prop)
+	return {
+		index = index,
+		typ = "float",
+		name = name,
+		icon_p = icon,
+		icon_n = "",
+		track = false,
+		magnitude = 1,
+		unit = "",
+		compare = false,
+		sign = false,
+		show_always = true,
+		value_functor = { "dorn_weapon_tooltip_stats", prop },
+	}
+end
+
 local function apply_enhanced_weapon_stats()
 	if not utils_ui or not utils_ui.stats_table then
 		return
@@ -311,16 +457,55 @@ local function apply_enhanced_weapon_stats()
 		return
 	end
 
-	if CONFIG.show_enhanced_weapon_stats then
+	set_base_stat(weapon_stats, "accuracy", CONFIG.show_accuracy)
+	set_base_stat(weapon_stats, "handling", CONFIG.show_handling)
+	set_base_stat(weapon_stats, "reliability", CONFIG.show_reliability)
+	set_base_stat(weapon_stats, "recoil", CONFIG.show_recoil)
+	set_base_stat(weapon_stats, "speed", CONFIG.show_muzzle_velocity)
+
+	cache_base_stat(weapon_stats, "damage")
+	if CONFIG.show_hit_power then
 		weapon_stats["damage"] = HIT_POWER_STAT
+	else
+		weapon_stats["damage"] = saved_base_stats["damage"]
+	end
+
+	if CONFIG.show_stalker_damage then
+		weapon_stats["dorn_stalker_damage"] = STALKER_DAMAGE_STAT
+	else
+		weapon_stats["dorn_stalker_damage"] = nil
+	end
+	if CONFIG.show_mutant_damage then
 		weapon_stats["dorn_ammo_damage"] = RAW_AMMO_DAMAGE_STAT
 	else
-		weapon_stats["damage"] = nil
 		weapon_stats["dorn_ammo_damage"] = nil
 	end
+
+	local N = dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.NAME
+	if not N then
+		return
+	end
+
+	-- Indices sit just under the related base row (floats sort correctly).
+	weapon_stats["dorn_base_spread"] = CONFIG.show_base_spread
+		and make_dorn_row(1.5, N.base_spread, "ui_wp_prop_tochnost", "prop_base_spread")
+		or nil
+	weapon_stats["dorn_movement_spread"] = CONFIG.show_movement_spread
+		and make_dorn_row(2.5, N.movement_spread, "ui_wp_prop_ergonomics", "prop_movement_spread")
+		or nil
+	weapon_stats["dorn_weapon_wear"] = CONFIG.show_weapon_wear
+		and make_dorn_row(103.5, N.weapon_wear, "ui_wp_propery_08", "prop_weapon_wear")
+		or nil
+	weapon_stats["dorn_burst_control"] = CONFIG.show_burst_control
+		and make_dorn_row(104.5, N.burst_control, "ui_wp_propery_03", "prop_burst_control")
+		or nil
+	weapon_stats["dorn_bullet_drop"] = CONFIG.show_bullet_drop
+		and make_dorn_row(101.5, N.bullet_drop, "ui_wp_propery_06", "prop_bullet_drop")
+		or nil
 end
 
-local function read_show_enhanced_weapon_stats()
+-- Legacy single toggle (show_enhanced_weapon_stats) seeds both new keys when absent.
+local function read_legacy_enhanced_default()
 	if not DORN or not DORN.mcm then
 		return true
 	end
@@ -346,6 +531,69 @@ local function read_show_enhanced_weapon_stats()
 		return DORN.mcm.bool(MOD_ID, "main/show_damage_stat", false)
 	end
 
+	return true
+end
+
+local function read_show_new_weapon_stats_default()
+	if not DORN or not DORN.mcm then
+		return true
+	end
+	if DORN.mcm.get(MOD_ID, "main/show_new_weapon_stats") ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/show_new_weapon_stats", true)
+	end
+	return read_legacy_enhanced_default()
+end
+
+local function read_new_stat_flag(key)
+	if not DORN or not DORN.mcm then
+		return true
+	end
+	if DORN.mcm.get(MOD_ID, "main/" .. key) ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/" .. key, true)
+	end
+	return read_show_new_weapon_stats_default()
+end
+
+-- Legacy master / per-append keys seed the new child-row toggles when absent.
+local function read_extra_stat_default()
+	if not DORN or not DORN.mcm then
+		return true
+	end
+	if DORN.mcm.get(MOD_ID, "main/show_appended_weapon_stats") ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/show_appended_weapon_stats", true)
+	end
+	return read_legacy_enhanced_default()
+end
+
+local EXTRA_STAT_LEGACY = {
+	show_base_spread = "show_append_accuracy",
+	show_movement_spread = "show_append_handling",
+	show_weapon_wear = "show_append_reliability",
+	show_burst_control = "show_append_recoil",
+	show_bullet_drop = "show_append_muzzle_velocity",
+}
+
+local function read_extra_stat_flag(key)
+	if not DORN or not DORN.mcm then
+		return true
+	end
+	if DORN.mcm.get(MOD_ID, "main/" .. key) ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/" .. key, true)
+	end
+	local legacy = EXTRA_STAT_LEGACY[key]
+	if legacy and DORN.mcm.get(MOD_ID, "main/" .. legacy) ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/" .. legacy, true)
+	end
+	return read_extra_stat_default()
+end
+
+local function read_base_stat_flag(key)
+	if not DORN or not DORN.mcm then
+		return true
+	end
+	if DORN.mcm.get(MOD_ID, "main/" .. key) ~= nil then
+		return DORN.mcm.bool(MOD_ID, "main/" .. key, true)
+	end
 	return true
 end
 
@@ -389,9 +637,36 @@ local function on_option_change()
 	local prev_debug = CONFIG.debug_log
 	if DORN and DORN.mcm then
 		CONFIG.show_damage_table = DORN.mcm.bool(MOD_ID, "main/show_damage_table", true)
-		CONFIG.show_enhanced_weapon_stats = read_show_enhanced_weapon_stats()
-		local headers = DORN.mcm.string(MOD_ID, "main/column_headers", "brc")
-		CONFIG.column_headers = headers == "npc" and "npc" or "brc"
+		CONFIG.show_hit_power = read_new_stat_flag("show_hit_power")
+		CONFIG.show_stalker_damage = read_new_stat_flag("show_stalker_damage")
+		CONFIG.show_mutant_damage = read_new_stat_flag("show_mutant_damage")
+		CONFIG.show_accuracy = read_base_stat_flag("show_accuracy")
+		CONFIG.show_handling = read_base_stat_flag("show_handling")
+		CONFIG.show_reliability = read_base_stat_flag("show_reliability")
+		CONFIG.show_recoil = read_base_stat_flag("show_recoil")
+		CONFIG.show_muzzle_velocity = read_base_stat_flag("show_muzzle_velocity")
+		CONFIG.show_base_spread = read_extra_stat_flag("show_base_spread")
+		CONFIG.show_movement_spread = read_extra_stat_flag("show_movement_spread")
+		CONFIG.show_weapon_wear = read_extra_stat_flag("show_weapon_wear")
+		CONFIG.show_burst_control = read_extra_stat_flag("show_burst_control")
+		CONFIG.show_bullet_drop = read_extra_stat_flag("show_bullet_drop")
+		-- "raw" = bone armor floats; "names" = short class labels.
+		-- Legacy MCM values: "npc" -> raw, "brc" -> names.
+		local headers = DORN.mcm.string(MOD_ID, "main/column_headers", "names")
+		if headers == "raw" or headers == "npc" then
+			CONFIG.column_headers = "raw"
+		else
+			CONFIG.column_headers = "names"
+		end
+		local order = DORN.mcm.string(MOD_ID, "main/ammo_order", "damage")
+		if order == "ap" then
+			CONFIG.ammo_order = "ap"
+		else
+			CONFIG.ammo_order = "damage"
+		end
+		CONFIG.calc_range_m = clamp(DORN.mcm.number(MOD_ID, "main/calc_range", 20), 0, 200)
+		CONFIG.use_condition_table = DORN.mcm.bool(MOD_ID, "main/use_condition_table", false)
+		CONFIG.use_condition_stats = DORN.mcm.bool(MOD_ID, "main/use_condition_stats", false)
 		CONFIG.debug_log = DORN.mcm.bool(MOD_ID, "development/debug_log", false)
 	end
 
@@ -406,8 +681,18 @@ local function on_option_change()
 		info.section = nil
 	end
 
-	log_once("config", string.format("config: show_damage_table=%s, show_enhanced_weapon_stats=%s",
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_enhanced_weapon_stats)))
+	log_once("config", string.format(
+		"config: table=%s hit=%s mutant=%s base=%s/%s/%s/%s/%s extra=%s/%s/%s/%s/%s headers=%s order=%s",
+		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
+		tostring(CONFIG.show_mutant_damage),
+		tostring(CONFIG.show_accuracy), tostring(CONFIG.show_handling),
+		tostring(CONFIG.show_reliability), tostring(CONFIG.show_recoil),
+		tostring(CONFIG.show_muzzle_velocity),
+		tostring(CONFIG.show_base_spread), tostring(CONFIG.show_movement_spread),
+		tostring(CONFIG.show_weapon_wear), tostring(CONFIG.show_burst_control),
+		tostring(CONFIG.show_bullet_drop), tostring(CONFIG.column_headers),
+		tostring(CONFIG.ammo_order), tostring(CONFIG.calc_range_m),
+		tostring(CONFIG.use_condition_table), tostring(CONFIG.use_condition_stats)))
 end
 
 local function first_number(str)
@@ -439,42 +724,105 @@ function prop_raw_ammo_damage_slash_flag(obj, sec)
 	end
 end
 
+function prop_stalker_ammo_damage_slash_flag(obj, sec)
+	if format_stalker_ammo_damage_slash(obj, sec) then
+		return 1
+	end
+end
+
 function scale_hit_power_display(obj, sec, base_file, base_func, param)
 	local base = _G[base_file][base_func](obj, sec, param)
 	return math.floor(base * DAMAGE_SCALE)
 end
 
-local function get_difficulty_mult()
-	local diff = 3
-	if alife_storage_manager and alife_storage_manager.get_state then
-		local st = alife_storage_manager.get_state()
-		if st and st.diff_game and st.diff_game.type then
-			diff = st.diff_game.type
+local function dist_atten(air_res, dist)
+	return 1 + dist / 200 * air_res * 0.5 / (1 - air_res + 0.1)
+end
+
+local function calc_range()
+	local d = tonumber(CONFIG.calc_range_m)
+	if not d then
+		return REF_DIST_M
+	end
+	return clamp(d, 0, 200)
+end
+
+-- GBOOBS barrel part condition (0..1). Missing parts data => 1.0.
+local function raw_barrel_condition(obj)
+	if not obj then
+		return 1
+	end
+	local ok, parts = pcall(function()
+		return se_load_var(obj:id(), obj:name(), "parts")
+	end)
+	if not ok or type(parts) ~= "table" then
+		return 1
+	end
+	for k, v in pairs(parts) do
+		if type(k) == "string" and string.find(k, "barrel") then
+			local n = tonumber(v)
+			if n then
+				return clamp(n / 100, 0, 1)
+			end
 		end
 	end
-	return DIFFICULTY_MULT[diff] or DIFFICULTY_MULT[3]
+	return 1
 end
 
-local function dist_atten(air_res, dist)
-	return 1 + dist / 200 * (air_res * 0.5 / (1 - air_res + 0.1))
+-- GBOOBS corrected barrel mult: stalker *1.3, mutant *1.6, capped at 1.
+-- When use_condition is false, always 1.0 (100%).
+local function barrel_mult(obj, use_condition, kind)
+	if not use_condition then
+		return 1
+	end
+	local scale = (kind == "mutant") and 1.6 or 1.3
+	local corrected = raw_barrel_condition(obj) * scale
+	if corrected > 1 then
+		return 1
+	end
+	return corrected
 end
 
--- Display AP at which combat_ap first penetrates the hardest BRC tier (torso or
--- head), using the same formula as effective_dmg at REF_DIST_M.
-local function ap_pen_display_max(diff_mult)
-	local dist_mult = dist_atten(AP_COLOR_REF_AIR, REF_DIST_M)
-	local pen_scale = 10 * diff_mult * AP_COMBAT_TAIL
+-- GAMMA character-creation difficulty (1-4). Falls back to engine gd index.
+local function difficulty_mult()
+	local ok, state = pcall(function()
+		return alife_storage_manager.get_state()
+	end)
+	if ok and state and type(state.diff_game) == "table" then
+		local t = tonumber(state.diff_game.type)
+		if t and DIFFICULTY_MULT[t] then
+			return DIFFICULTY_MULT[t]
+		end
+	end
+	if level and level.get_game_difficulty then
+		local gd = level.get_game_difficulty()
+		-- Engine is 0-based; GAMMA diff_game type is 1-based.
+		local t = (tonumber(gd) or 0) + 1
+		if DIFFICULTY_MULT[t] then
+			return DIFFICULTY_MULT[t]
+		end
+	end
+	return 1.0
+end
+
+-- Display AP (k_ap x 1000) at which combat_ap first penetrates the hardest
+-- listed armor tier, using the same GBOOBS formula as effective_dmg at calc_range().
+local function ap_pen_display_max()
+	local dist_mult = dist_atten(AP_COLOR_REF_AIR, calc_range())
 	local hi = AP_COLOR_LO
 
-	for _, tier in ipairs(BRC_TIERS) do
-		local k_torso = tier.torso * dist_mult / (pen_scale * tier.torso_ap)
+	for _, tier in ipairs(TORSO_TIERS) do
+		-- armor = k_ap * ap_scale / dist_mult  =>  k_ap = armor * dist_mult / ap_scale
+		local k_torso = tier.armor * dist_mult / tier.ap_scale
 		local display_torso = k_torso * AP_SCALE
 		if display_torso > hi then
 			hi = display_torso
 		end
+	end
 
-		local head_req = tier.head * dist_mult / (tier.head_ap * diff_mult * AP_COMBAT_TAIL)
-		local k_head = (head_req - HEAD_AP_BOOST) / 10
+	for _, tier in ipairs(HEAD_TIERS) do
+		-- Same formula as torso: vs Head columns model bip01_head (no eye AP boost).
+		local k_head = tier.armor * dist_mult / tier.ap_scale
 		if k_head > 0 then
 			local display_head = k_head * AP_SCALE
 			if display_head > hi then
@@ -487,7 +835,7 @@ local function ap_pen_display_max(diff_mult)
 end
 
 local function ap_display_color(ap)
-	local hi = ap_pen_display_max(get_difficulty_mult())
+	local hi = ap_pen_display_max()
 	local t = clamp((ap - AP_COLOR_LO) / (hi - AP_COLOR_LO), 0, 1)
 	return GetARGB(255,
 		math.floor(lerp(175, 255, t)),
@@ -495,24 +843,23 @@ local function ap_display_color(ap)
 		math.floor(lerp(175, 0, t)))
 end
 
-local function combat_ap(k_ap_ltx, air_res, dist, ap_scale, diff_mult, headshot)
-	local k_ap = k_ap_ltx * 10
-	if headshot then
-		k_ap = k_ap + HEAD_AP_BOOST
-	end
-	k_ap = k_ap * ap_scale / dist_atten(air_res, dist) * diff_mult * AP_COMBAT_TAIL
-	return k_ap
+-- GBOOBS: k_ap x ap_scale x barrel / range_factor.
+local function combat_ap(k_ap_ltx, air_res, dist, ap_scale, barrel)
+	return k_ap_ltx * ap_scale * (barrel or 1) / dist_atten(air_res, dist)
 end
 
-local function base_power(hit_power, k_hit, air_res, dist, bone_mult, ap_scale, diff_mult, pellet_mult)
+-- GBOOBS NPC power, plus difficulty and optional barrel factor.
+local function base_power(hit_power, k_hit, air_res, dist, bone_mult, ap_scale, pellet_mult, barrel)
 	return hit_power / dist_atten(air_res, dist)
-		* k_hit * bone_mult * ap_scale * GBOOBS_BONUS * diff_mult * pellet_mult
+		* k_hit * bone_mult * ap_scale * GBOOBS_BONUS * pellet_mult
+		* difficulty_mult() * (barrel or 1)
 end
 
-local function effective_dmg(hit_power, k_hit, k_ap_ltx, air_res, armor, ap_scale, hit_frac, bone_mult, headshot, dist, diff_mult, pellet_mult)
-	local ap = combat_ap(k_ap_ltx, air_res, dist, ap_scale, diff_mult, headshot)
-	local power = base_power(hit_power, k_hit, air_res, dist, bone_mult, ap_scale, diff_mult, pellet_mult)
-	local penetrated = ap >= armor
+local function effective_dmg(hit_power, k_hit, k_ap_ltx, air_res, armor, ap_scale, hit_frac, bone_mult, dist, pellet_mult, barrel)
+	local ap = combat_ap(k_ap_ltx, air_res, dist, ap_scale, barrel)
+	local power = base_power(hit_power, k_hit, air_res, dist, bone_mult, ap_scale, pellet_mult, barrel)
+	-- Armor 0 (bare head): always full power; never apply chip hit_frac.
+	local penetrated = (armor <= 0) or (ap >= armor)
 	local dmg = penetrated and power or (power * hit_frac)
 	return {
 		dmg = dmg * DAMAGE_SCALE,
@@ -520,9 +867,9 @@ local function effective_dmg(hit_power, k_hit, k_ap_ltx, air_res, armor, ap_scal
 	}
 end
 
-local function fmt_tier_cells(vals)
+local function fmt_tier_cells(vals, num_tiers)
 	local out = {}
-	for i = 1, NUM_TIERS do
+	for i = 1, num_tiers do
 		local cell = vals[i]
 		if cell then
 			out[i] = {
@@ -538,10 +885,10 @@ end
 -- Highest damage in a table section across every ammo row (torso or head).
 local function section_dmg_max(rows, section)
 	local hi = 1
-	local i0 = (section == "head") and HEAD_TIER_START or 1
+	local n = (section == "head") and NUM_HEAD_TIERS or NUM_TORSO_TIERS
 	for _, row in ipairs(rows) do
 		local cells = section == "torso" and row.torso or row.head
-		for i = i0, NUM_TIERS do
+		for i = 1, n do
 			local c = cells[i]
 			if c and c.dmg > hi then
 				hi = c.dmg
@@ -551,22 +898,21 @@ local function section_dmg_max(rows, section)
 	return hi
 end
 
-local function calc_tier_damages(hit_power, k_hit, k_ap_ltx, air_res, headshot, dist, diff_mult, pellet_mult)
+local function calc_tier_damages(hit_power, k_hit, k_ap_ltx, air_res, tiers, headshot, dist, pellet_mult, barrel)
 	local bone_mult = headshot and BONE_DMG_HEAD or BONE_DMG_TORSO
 	local out = {}
-	for i, tier in ipairs(BRC_TIERS) do
-		local armor = headshot and tier.head or tier.torso
-		local ap_scale = headshot and tier.head_ap or tier.torso_ap
+	for i, tier in ipairs(tiers) do
 		out[i] = effective_dmg(
-			hit_power, k_hit, k_ap_ltx, air_res, armor,
-			ap_scale, tier.hit_frac, bone_mult, headshot,
-			dist, diff_mult, pellet_mult
+			hit_power, k_hit, k_ap_ltx, air_res, tier.armor,
+			tier.ap_scale, tier.hit_frac, bone_mult,
+			dist, pellet_mult, barrel
 		)
 	end
 	return out
 end
 
--- Unique ammo rounds for a weapon, AP-desc (same order as the damage table).
+-- Unique ammo rounds for a weapon (same order as the damage table).
+-- ammo_order "damage": dmg desc, then AP asc. "ap": AP desc, then label.
 local function collect_sorted_ammo_rounds(obj, sec, max_count)
 	local ammo_class = SYS_GetParam(0, sec, "ammo_class", "")
 	if not ammo_class or ammo_class == "" then
@@ -606,6 +952,8 @@ local function collect_sorted_ammo_rounds(obj, sec, max_count)
 				air_res = air_res,
 				pellets = pellets,
 				ap = math.floor(k_ap * AP_SCALE + 0.5),
+				-- Weapon hit_power is constant per gun; sort by ammo damage contribution.
+				dmg = k_hit * pellets,
 			}
 		end
 	end
@@ -616,8 +964,17 @@ local function collect_sorted_ammo_rounds(obj, sec, max_count)
 	end
 
 	table.sort(rounds, function(a, b)
+		if CONFIG.ammo_order == "ap" then
+			if a.ap ~= b.ap then
+				return a.ap > b.ap
+			end
+			return a.label < b.label
+		end
+		if a.dmg ~= b.dmg then
+			return a.dmg > b.dmg
+		end
 		if a.ap ~= b.ap then
-			return a.ap > b.ap
+			return a.ap < b.ap
 		end
 		return a.label < b.label
 	end)
@@ -645,18 +1002,18 @@ local function build_ammo_damage_rows(obj, sec)
 		return nil
 	end
 
-	local diff_mult = get_difficulty_mult()
-
+	local dist = calc_range()
+	local barrel = barrel_mult(obj, CONFIG.use_condition_table, "stalker")
 	local rows = {}
 	for _, r in ipairs(rounds) do
 		local torso = fmt_tier_cells(calc_tier_damages(
-			hit_power, r.k_hit, r.k_ap, r.air_res,
-			false, REF_DIST_M, diff_mult, r.pellets
-		))
+			hit_power, r.k_hit, r.k_ap, r.air_res, TORSO_TIERS,
+			false, dist, r.pellets, barrel
+		), NUM_TORSO_TIERS)
 		local head = fmt_tier_cells(calc_tier_damages(
-			hit_power, r.k_hit, r.k_ap, r.air_res,
-			true, REF_DIST_M, diff_mult, r.pellets
-		))
+			hit_power, r.k_hit, r.k_ap, r.air_res, HEAD_TIERS,
+			true, dist, r.pellets, barrel
+		), NUM_HEAD_TIERS)
 		rows[#rows + 1] = {
 			label = r.label,
 			ap = r.ap,
@@ -693,8 +1050,42 @@ local function build_ammo_damage_rows(obj, sec)
 	}
 end
 
--- Per-ammo damage (hit_power x k_hit x pellets x current difficulty), same
--- ammo order as the damage table. No range or armor.
+-- Mutant ammo_mult (default 0.85). Matches GBOOBS monster hit rules; Pseudogiant-only
+-- overrides are intentionally omitted (this row is generic flesh damage).
+local MUTANT_BASE_MULT = 0.90
+local MUTANT_AMMO_MULT_DEFAULT = 0.85
+local MUTANT_AMMO_MULT = {
+	["ammo_12x70_buck"] = 0.78,
+	["ammo_12x70_buck_bad"] = 0.78,
+	["ammo_20x70_buck"] = 0.78,
+	["ammo_23x75_shrapnel"] = 0.78,
+	["ammo_12x76_zhekan"] = 1.40,
+	["ammo_12x76_zhekan_bad"] = 1.40,
+	["ammo_23x75_barrikada"] = 2.50,
+	["ammo_9x19_pbp"] = 1.00,
+	["ammo_9x19_pbp_bad"] = 1.00,
+	["ammo_9x18_pmm"] = 1.00,
+	["ammo_9x18_pmm_bad"] = 1.00,
+	["ammo_5.45x39_ep"] = 1.00,
+	["ammo_5.45x39_ep_bad"] = 1.00,
+	["ammo_5.56x45_ss190"] = 1.00,
+	["ammo_5.56x45_ss190_bad"] = 1.00,
+	["ammo_7.62x25_ps"] = 1.10,
+	["ammo_7.62x25_ps_bad"] = 1.10,
+	["ammo_357_hp_mag"] = 2.30,
+	["ammo_357_hp_mag_bad"] = 2.30,
+	["ammo_11.43x23_hydro"] = 1.25,
+	["ammo_11.43x23_hydro_bad"] = 1.25,
+	["ammo_11.43x23_fmj"] = 1.20,
+	["ammo_11.43x23_fmj_bad"] = 1.20,
+}
+
+local function mutant_ammo_mult(ammo_sec)
+	return MUTANT_AMMO_MULT[ammo_sec] or MUTANT_AMMO_MULT_DEFAULT
+end
+
+-- Per-ammo flesh damage vs a generic mutant (species mult 100%, no weak spot).
+-- Same ammo order as the damage table.
 format_raw_ammo_damage_slash = function(obj, sec)
 	local rounds = collect_sorted_ammo_rounds(obj, sec, nil)
 	if not rounds then
@@ -706,10 +1097,48 @@ format_raw_ammo_damage_slash = function(obj, sec)
 		return nil
 	end
 
-	local diff_mult = get_difficulty_mult()
+	local dist = calc_range()
+	local barrel = barrel_mult(obj, CONFIG.use_condition_stats, "mutant")
+	local diff = difficulty_mult()
 	local parts = {}
 	for _, r in ipairs(rounds) do
-		local dmg = math.floor(hit_power * r.k_hit * r.pellets * diff_mult * DAMAGE_SCALE + 0.5)
+		local dmg = math.floor(
+			hit_power / dist_atten(r.air_res, dist)
+				* r.k_hit * r.pellets
+				* MUTANT_BASE_MULT * mutant_ammo_mult(r.sec)
+				* barrel * diff
+				* DAMAGE_SCALE + 0.5
+		)
+		parts[#parts + 1] = tostring(dmg)
+	end
+
+	if #parts == 0 then
+		return nil
+	end
+	return table.concat(parts, "/")
+end
+
+-- Per-ammo pre-armor stalker torso damage at calc_range() (GBOOBS power, no AP/armor).
+-- Same ammo order as the damage table.
+format_stalker_ammo_damage_slash = function(obj, sec)
+	local rounds = collect_sorted_ammo_rounds(obj, sec, nil)
+	if not rounds then
+		return nil
+	end
+
+	local hit_power = gun_hit_power(obj, sec)
+	if hit_power <= 0 then
+		return nil
+	end
+
+	local dist = calc_range()
+	local barrel = barrel_mult(obj, CONFIG.use_condition_stats, "stalker")
+	local parts = {}
+	for _, r in ipairs(rounds) do
+		local dmg = math.floor(
+			base_power(hit_power, r.k_hit, r.air_res, dist, BONE_DMG_TORSO, 1.0, r.pellets, barrel)
+				* DAMAGE_SCALE + 0.5
+		)
 		parts[#parts + 1] = tostring(dmg)
 	end
 
@@ -724,29 +1153,27 @@ local function apply_column_headers(fields)
 		return
 	end
 
-	local show_npc = CONFIG.column_headers == "npc"
-	local grp_torso = show_npc and "vs Torso (NPC %)" or "vs Torso (BRC)"
-	local grp_head = show_npc and "vs Head (NPC %)" or "vs Head (BRC)"
+	local show_raw = CONFIG.column_headers == "raw"
 
 	if fields.grp_torso then
-		fields.grp_torso:SetText(grp_torso)
+		fields.grp_torso:SetText("vs Torso")
 	end
 	if fields.grp_head then
-		fields.grp_head:SetText(grp_head)
+		fields.grp_head:SetText("vs Head")
 	end
 
-	for i = 1, NUM_TIERS do
-		local tier = BRC_TIERS[i]
-		local torso_label = show_npc and format_npc_armor_pct(tier.torso) or tostring(tier.brc_torso)
-		if fields.col_labels.torso[i] then
-			fields.col_labels.torso[i]:SetText(torso_label)
+	for i, tier in ipairs(TORSO_TIERS) do
+		local wnd = fields.col_labels.torso[i]
+		if wnd then
+			wnd:SetText(show_raw and format_armor_label(tier.armor) or tier.name)
+			wnd:SetTextColor(CLR.white)
 		end
 	end
-	for h = 1, NUM_HEAD_TIERS do
-		local tier = BRC_TIERS[HEAD_TIER_START + h - 1]
-		local head_label = show_npc and format_npc_armor_pct(tier.head) or tostring(tier.brc_head)
-		if fields.col_labels.head[h] then
-			fields.col_labels.head[h]:SetText(head_label)
+	for i, tier in ipairs(HEAD_TIERS) do
+		local wnd = fields.col_labels.head[i]
+		if wnd then
+			wnd:SetText(show_raw and format_armor_label(tier.armor) or tier.name)
+			wnd:SetTextColor(CLR.white)
 		end
 	end
 end
@@ -792,7 +1219,7 @@ local function init_row_fields(xml, dlg, row_path)
 		torso = {},
 		head = {},
 	}
-	for i = 1, NUM_TIERS do
+	for i = 1, NUM_TORSO_TIERS do
 		row.torso[i] = xml:InitTextWnd(row_path .. ":t" .. i, base)
 	end
 	for i = 1, NUM_HEAD_TIERS do
@@ -802,7 +1229,7 @@ local function init_row_fields(xml, dlg, row_path)
 end
 
 local COL_HDR_2 = { "type", "ap" }
-for i = 1, NUM_TIERS do
+for i = 1, NUM_TORSO_TIERS do
 	COL_HDR_2[#COL_HDR_2 + 1] = "t" .. i
 end
 for i = 1, NUM_HEAD_TIERS do
@@ -904,12 +1331,11 @@ local function populate_damage_fields(fields, data, panel_width)
 			row.type:SetTextColor(CLR.white)
 			row.ap:SetText(rd.ap or "")
 			row.ap:SetTextColor(ap_display_color(rd.ap_val or 0))
-			for t = 1, NUM_TIERS do
+			for t = 1, NUM_TORSO_TIERS do
 				set_damage_cell(row.torso[t], rd.torso and rd.torso[t], rd.torso_lo, rd.torso_hi)
 			end
 			for h = 1, NUM_HEAD_TIERS do
-				local tier_idx = HEAD_TIER_START + h - 1
-				set_damage_cell(row.head[h], rd.head and rd.head[tier_idx], rd.head_lo, rd.head_hi)
+				set_damage_cell(row.head[h], rd.head and rd.head[h], rd.head_lo, rd.head_hi)
 			end
 			row.base:SetWndPos(vector2():set(0, row_y))
 			row.base:Show(true)
@@ -1071,15 +1497,34 @@ end
 -- The details/workshop sheets build stats via utils_ui.get_stats_xml, which
 -- paints the value grey (clr_list p1) and never exposes the created text window
 -- for later recolor (unlike the hover tooltip's reused stat boxes). So for our
--- two stat rows we rebuild the box ourselves with white text; everything else
+-- Dorn rows we rebuild the box ourselves with white text; everything else
 -- falls through to the stock implementation.
 local base_get_stats_xml
+
+local DORN_WHITE_STAT_NAMES = {
+	["ui_dorn_wpn_hit_power"] = true,
+	["ui_dorn_wpn_stalker_damage"] = true,
+	["ui_dorn_wpn_ammo_torso"] = true,
+	["ui_dorn_wpn_base_spread"] = true,
+	["ui_dorn_wpn_movement_spread"] = true,
+	["ui_dorn_wpn_weapon_wear"] = true,
+	["ui_dorn_wpn_burst_control"] = true,
+	["ui_dorn_wpn_bullet_drop"] = true,
+}
 
 local function build_white_stat_xml(handler, obj, sec, gr, stat)
 	local value, nclr
 
 	if gr.name == "ui_dorn_wpn_ammo_torso" then
 		value = format_raw_ammo_damage_slash(obj, sec)
+		nclr = false
+	elseif gr.name == "ui_dorn_wpn_stalker_damage" then
+		value = format_stalker_ammo_damage_slash(obj, sec)
+		nclr = false
+	elseif gr.name == "ui_dorn_wpn_hit_power" then
+		value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
+	elseif dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.text_for_name then
+		value = dorn_weapon_tooltip_stats.text_for_name(gr.name, obj, sec)
 		nclr = false
 	else
 		value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
@@ -1108,52 +1553,16 @@ local function build_white_stat_xml(handler, obj, sec, gr, stat)
 	return st
 end
 
-local function build_weapon_stat_xml(handler, obj, sec, gr, stat)
-	local value, nclr = utils_ui.get_stats_string_value(obj, sec, gr, stat)
-	if not value then
-		return nil
-	end
-	if dorn_weapon_tooltip_stats and dorn_weapon_tooltip_stats.append_to_value_string then
-		value = dorn_weapon_tooltip_stats.append_to_value_string(value, gr.name, obj, sec)
-	end
-
-	local st = STAT_XML:InitStatic("item_info:stats_box", handler)
-	local st_icon = STAT_XML:InitStatic("item_info:stats_box:icon", st)
-	st_icon:InitTexture(gr.icon_p)
-
-	local st_cap = STAT_XML:InitTextWnd("item_info:stats_box:cap", st)
-	st_cap:SetText(game.translate_string(gr.name))
-
-	local st_txt = STAT_XML:InitTextWnd("item_info:stats_box:prog_txt", st)
-	st_txt:SetText(value)
-	st_txt:SetTextColor(nclr and CLR.stat_neg or CLR.stat_pos)
-
-	st:SetAutoDelete(true)
-	return st
-end
-
 local function get_stats_xml_hook(handler, obj, sec, gr, stat)
 	local grp = gr
 	if type(grp) == "string" then
 		grp = utils_ui.stats_table and utils_ui.stats_table[grp]
 	end
 
-	if grp and not grp.track and CONFIG.show_enhanced_weapon_stats and grp.name
-		and (grp.name == "ui_dorn_wpn_hit_power" or grp.name == "ui_dorn_wpn_ammo_torso") then
+	if grp and not grp.track and grp.name and DORN_WHITE_STAT_NAMES[grp.name] then
 		local ok, st = pcall(build_white_stat_xml, handler, obj, sec, grp, stat)
 		if ok and st then
 			return st
-		end
-	end
-
-	if CONFIG.show_enhanced_weapon_stats and grp and obj and IsWeapon(obj) and not grp.track
-		and dorn_weapon_tooltip_stats then
-		local append = dorn_weapon_tooltip_stats.append_for_name(grp.name, obj, sec)
-		if append then
-			local ok, st = pcall(build_weapon_stat_xml, handler, obj, sec, grp, stat)
-			if ok and st then
-				return st
-			end
 		end
 	end
 
@@ -1274,6 +1683,10 @@ end
 local function on_console_execute(cmd)
 	if cmd == "g_game_difficulty" then
 		apply_enhanced_weapon_stats()
+		for info in pairs(tracked_infos) do
+			info.id = nil
+			info.section = nil
+		end
 	end
 end
 
@@ -1293,7 +1706,8 @@ function on_game_start()
 	RegisterScriptCallback("on_option_change", on_option_change)
 
 	log_once("startup", string.format(
-		"loaded: dorn=%s, ui_hooks=%s, details_hook=%s, show_damage_table=%s, show_enhanced_weapon_stats=%s",
+		"loaded: dorn=%s, ui_hooks=%s, details_hook=%s, table=%s, hit=%s, mutant=%s",
 		tostring(DORN ~= nil), tostring(ui_hooks_ok), tostring(details_hook_ok),
-		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_enhanced_weapon_stats)))
+		tostring(CONFIG.show_damage_table), tostring(CONFIG.show_hit_power),
+		tostring(CONFIG.show_mutant_damage)))
 end

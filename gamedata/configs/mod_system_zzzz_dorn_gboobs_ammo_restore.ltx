@@ -1,0 +1,32 @@
+; Undo leftover CQC DLTX from mod_system_gamma_ammo_balance.ltx.
+; That file only patches these three ammo sections (not whole categories).
+; CQC wrote tiny k_ap for its old ×10 AP formula; under GBOOBS those leftovers
+; stay literal (e.g. .338 k_ap 0.008 instead of ~0.85).
+; Filename sorts after mod_system_gamma_ammo_balance so these win under DLTX.
+; Restore targets = 181 GBOOBS w_ammo_bas. Only keys CQC set differently are listed.
+; Comments: CQC leftover → GBOOBS value.
+
+![ammo_23x75_shrapnel]
+cost             = 1650  ; CQC 2000 → GBOOBS 1650
+k_hit            = 2.20  ; CQC 1.5 → GBOOBS 2.20
+k_ap             = 0.04  ; CQC 0.006 → GBOOBS 0.04  (CQC ×10 leftover)
+k_disp           = 4.5   ; CQC 2.5 → GBOOBS 4.5
+k_air_resistance = 0.9   ; CQC 0.8 → GBOOBS 0.9
+; wm_size: CQC 0.08 == GBOOBS, left alone
+
+![ammo_23x75_barrikada]
+cost             = 9500  ; CQC 7000 → GBOOBS 9500
+k_hit            = 3.00  ; CQC 4.2 → GBOOBS 3.00
+k_ap             = 0.50  ; CQC 0.054 → GBOOBS 0.50  (CQC ×10 leftover)
+wm_size          = 0.2   ; CQC 0.23 → GBOOBS 0.2
+k_air_resistance = 0.85  ; CQC 0.7 → GBOOBS 0.85
+k_bullet_speed   = 1.35  ; CQC 1.5 → GBOOBS 1.35
+
+![ammo_338_federal]
+cost             = 8100  ; CQC 4000 → GBOOBS 8100
+k_hit            = 1     ; CQC 10.7 → GBOOBS inherit/1
+k_ap             = 0.85  ; CQC 0.008 → GBOOBS 0.85  (CQC ×10 leftover)
+k_impulse        = 1.4   ; CQC 2.0 → GBOOBS 1.4
+wm_size          = 0.066 ; CQC 0.086 → GBOOBS 0.066
+; k_disp 0.67, k_air_resistance 0.05, tracer_color_ID 2: CQC == GBOOBS, left alone
+; CQC also set k_bullet_speed=1.5 and k_cam_dispersion=1.5 (absent in GBOOBS); DLTX cannot delete keys

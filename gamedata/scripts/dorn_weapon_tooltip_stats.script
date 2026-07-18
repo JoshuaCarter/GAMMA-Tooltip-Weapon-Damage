@@ -1,6 +1,7 @@
 --[[
-	Real-value stat appends for Dorn's Weapon Tooltip (accuracy, handling,
-	reliability, recoil, muzzle drop). Loaded before zz_dorn_weapon_tooltip_main.
+	Extra weapon stat rows for Dorn's Weapon Tooltip (base spread, movement
+	spread, weapon wear, burst control, bullet drop). Loaded before
+	zz_dorn_weapon_tooltip_main, which registers them in utils_ui.stats_table.
 ]]
 
 dorn_weapon_tooltip_stats = {}
@@ -20,12 +21,13 @@ local DROP_RANGE_M = 200
 -- Tweakable: ADS camera kick angle (degrees) used for Burst Control.
 local RECOIL_KICK_THRESHOLD = 3.0
 
-local STAT_NAMES = {
-	accuracy = "ui_inv_accuracy",
-	handling = "ui_inv_handling",
-	reliability = "ui_inv_reli",
-	recoil = "ui_inv_recoil",
-	speed = "ui_inv_bspeed",
+-- String ids for the new rows (also used by main for white-text display).
+S.NAME = {
+	base_spread = "ui_dorn_wpn_base_spread",
+	movement_spread = "ui_dorn_wpn_movement_spread",
+	weapon_wear = "ui_dorn_wpn_weapon_wear",
+	burst_control = "ui_dorn_wpn_burst_control",
+	bullet_drop = "ui_dorn_wpn_bullet_drop",
 }
 
 local function wpn_param(obj, sec, key, default)
@@ -90,7 +92,11 @@ local function hip_spread_for_weapon(obj, sec, speed)
 	return fire_disp + actor
 end
 
-function S.append_accuracy(obj, sec)
+function S.text_base_spread(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
 	local v = wpn_param(obj, sec, "fire_dispersion_base", 0)
 	if v <= 0 then
 		return nil
@@ -98,7 +104,11 @@ function S.append_accuracy(obj, sec)
 	return fmt_deg(v)
 end
 
-function S.append_handling(obj, sec)
+function S.text_movement_spread(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
 	local walk = hip_spread_for_weapon(obj, sec, SPEED_WALK)
 	local run = hip_spread_for_weapon(obj, sec, SPEED_RUN)
 	if not walk or not run then
@@ -109,7 +119,11 @@ end
 
 -- Average condition loss per shot across ammo types (no silencer).
 -- Engine wear = condition_shot_dec * impair.
-function S.append_reliability(obj, sec)
+function S.text_weapon_wear(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
 	local dec = wpn_param(obj, sec, "condition_shot_dec", 0)
 	if dec <= 0 then
 		return nil
@@ -143,10 +157,11 @@ function S.append_reliability(obj, sec)
 end
 
 -- Fractional ADS shots until cumulative vertical camera climb reaches RECOIL_KICK_THRESHOLD.
--- Engine: each shot adds (disp + (n-1)*inc) to m_angle_vert; cam_return=1 also relaxes
--- toward 0 between shots at zoom_cam_relax_speed. Fire rate / recoil params use get_wpn_param
--- so installed upgrades are included when obj is present.
-function S.append_recoil(obj, sec)
+function S.text_burst_control(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
 	local disp = wpn_param(obj, sec, "zoom_cam_dispersion", 0)
 	if disp <= 0 then
 		return nil
@@ -154,7 +169,6 @@ function S.append_recoil(obj, sec)
 	local inc = wpn_param(obj, sec, "zoom_cam_dispersion_inc", 0)
 	local thr = RECOIL_KICK_THRESHOLD
 
-	-- Engine default is 1 when the line is missing.
 	local return_on = true
 	if ini_sys:line_exist(sec, "cam_return") then
 		return_on = wpn_param(obj, sec, "cam_return", 1) ~= 0
@@ -202,7 +216,11 @@ function S.append_recoil(obj, sec)
 	return string.format(">%d shots", max_shots)
 end
 
-function S.append_drop(obj, sec)
+function S.text_bullet_drop(obj, sec)
+	sec = resolve_sec(obj, sec)
+	if not is_weapon_target(obj, sec) then
+		return nil
+	end
 	local bullet_speed = wpn_param(obj, sec, "bullet_speed", 0)
 	if bullet_speed <= 0 then
 		return nil
@@ -224,71 +242,49 @@ function S.append_drop(obj, sec)
 	return fmt_drop_m(drop)
 end
 
-function S.build_appends(obj, sec)
-	sec = resolve_sec(obj, sec)
-	if not is_weapon_target(obj, sec) then
+local TEXT_BY_NAME = {
+	[S.NAME.base_spread] = S.text_base_spread,
+	[S.NAME.movement_spread] = S.text_movement_spread,
+	[S.NAME.weapon_wear] = S.text_weapon_wear,
+	[S.NAME.burst_control] = S.text_burst_control,
+	[S.NAME.bullet_drop] = S.text_bullet_drop,
+}
+
+function S.text_for_name(name_id, obj, sec)
+	local fn = TEXT_BY_NAME[name_id]
+	if not fn then
 		return nil
 	end
-
-	return {
-		[STAT_NAMES.accuracy] = S.append_accuracy(obj, sec),
-		[STAT_NAMES.handling] = S.append_handling(obj, sec),
-		[STAT_NAMES.reliability] = S.append_reliability(obj, sec),
-		[STAT_NAMES.recoil] = S.append_recoil(obj, sec),
-		[STAT_NAMES.speed] = S.append_drop(obj, sec),
-	}
+	return fn(obj, sec)
 end
 
-function S.append_for_name(name_id, obj, sec)
-	local appends = S.build_appends(obj, sec)
-	if not appends then
-		return nil
-	end
-	return appends[name_id]
-end
-
-local function join_value(base, append)
-	if not append or append == "" then
-		return base
-	end
-	if not base or base == "" then
-		return append
-	end
-	return base .. " · " .. append
-end
-
-function S.apply_to_tooltip(info, obj, sec)
-	if not info or not info.stats then
-		return
-	end
-
-	local appends = S.build_appends(obj, sec)
-	if not appends then
-		return
-	end
-
-	for _, ele in pairs(info.stats) do
-		if ele.cap and ele.txt and ele.cap.GetText then
-			local cap = ele.cap:GetText()
-			if cap then
-				for _, name_id in pairs(STAT_NAMES) do
-					local append = appends[name_id]
-					if append and cap == game.translate_string(name_id) then
-						local base = ele.txt:IsShown() and ele.txt:GetText() or ""
-						ele.txt:SetText(join_value(base, append))
-						ele.txt:Show(true)
-						ele.txt:SetTextColor(CLR and CLR.value or GetARGB(255, 175, 175, 175))
-					end
-				end
-			end
-		end
+-- Sentinel props so utils_ui creates the row; real text is applied by main.
+function S.prop_base_spread(obj, sec)
+	if S.text_base_spread(obj, sec) then
+		return 1
 	end
 end
 
-function S.append_to_value_string(value, name_id, obj, sec)
-	local append = S.append_for_name(name_id, obj, sec)
-	if append then
-		return join_value(value, append)
+function S.prop_movement_spread(obj, sec)
+	if S.text_movement_spread(obj, sec) then
+		return 1
 	end
-	return value
+end
+
+function S.prop_weapon_wear(obj, sec)
+	if S.text_weapon_wear(obj, sec) then
+		return 1
+	end
+end
+
+function S.prop_burst_control(obj, sec)
+	if S.text_burst_control(obj, sec) then
+		return 1
+	end
+end
+
+function S.prop_bullet_drop(obj, sec)
+	if S.text_bullet_drop(obj, sec) then
+		return 1
+	end
 end
