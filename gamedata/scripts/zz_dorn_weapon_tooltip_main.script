@@ -370,8 +370,13 @@ local function ammo_type_color(label)
 end
 
 -- Color family used for slash compare matching (FMJ↔SLUG, HP↔BUCK, AP↔SLAP, …).
+-- Grey is intentionally excluded: it is a misc bucket (ECO/VOG/????), not a type family.
 local function ammo_color_key(label)
-	return AMMO_TYPE_COLOR[label] or "grey"
+	local key = AMMO_TYPE_COLOR[label]
+	if key == "yellow" or key == "blue" or key == "orange" then
+		return key
+	end
+	return nil
 end
 
 local function color_ammo_value(label, text)
@@ -551,7 +556,7 @@ local function maybe_whiten_value(ele, color_value)
 end
 
 -- Build "(a / b / …)" or "(a, b)" with grey punctuation; only ±N is green/red.
--- diffs[i]=false → "-" placeholder (default color).
+-- diffs[i]=false → "-" placeholder (grey).
 local function apply_multipart_compare(ele, diffs, decimals, lower_is_better, color_value, _use_inline_colors, sep)
 	if not ele or not ele.comp or not diffs or #diffs == 0 then
 		return false
@@ -717,11 +722,11 @@ local function apply_companion_compare(ele, name_id, obj, sec, obj_b)
 	return apply_numeric_compare(ele, val_a, val_b, lower_better, decimals)
 end
 
--- Slash rows: walk current-weapon ammo order; match by section else Type color
--- family (yellow/blue/orange/grey — same map as the slash value colors:
--- FMJ↔SLUG, HP↔BUCK, AP↔SLAP, …). Missing on B → "-" placeholder so (+/-)
--- lines up with the left slash (e.g. FMJ/HP/AP vs FMJ/AP → "(+5 / - / -3)").
--- No shared colors at all → "(- / - / -)" so the column is not left blank.
+-- Slash rows: walk current-weapon ammo order. Match by section, else Type label,
+-- else Type color family (yellow/blue/orange only — same map as slash value colors:
+-- FMJ↔SLUG, HP↔BUCK, AP↔SLAP). Missing on B → "-" placeholder so (+/-) lines up
+-- with the left slash (e.g. FMJ/HP/AP vs FMJ/AP → "(+5 / - / -3)").
+-- No shared matches at all → "(- / - / -)" so the column is not left blank.
 local function apply_slash_damage_compare(ele, items_fn, obj, sec, obj_b)
 	if not items_fn or not obj_b or not ele or not ele.comp then
 		return false
@@ -732,6 +737,7 @@ local function apply_slash_damage_compare(ele, items_fn, obj, sec, obj_b)
 		return false
 	end
 	local b_by_sec = {}
+	local b_by_label = {}
 	local b_by_color = {}
 	for i = 1, #items_b do
 		local it = items_b[i]
@@ -739,7 +745,11 @@ local function apply_slash_damage_compare(ele, items_fn, obj, sec, obj_b)
 			b_by_sec[it.sec] = it.dmg
 		end
 		if it.label then
-			b_by_color[ammo_color_key(it.label)] = it.dmg
+			b_by_label[it.label] = it.dmg
+			local ck = ammo_color_key(it.label)
+			if ck then
+				b_by_color[ck] = it.dmg
+			end
 		end
 	end
 	local diffs = {}
@@ -748,8 +758,10 @@ local function apply_slash_damage_compare(ele, items_fn, obj, sec, obj_b)
 	local any_placeholder = false
 	for i = 1, #items_a do
 		local it = items_a[i]
+		local ck = it.label and ammo_color_key(it.label)
 		local b = (it.sec and b_by_sec[it.sec])
-			or (it.label and b_by_color[ammo_color_key(it.label)])
+			or (it.label and b_by_label[it.label])
+			or (ck and b_by_color[ck])
 		if b ~= nil then
 			any_shared = true
 			local d = round_compare(it.dmg, 1) - round_compare(b, 1)
@@ -767,7 +779,7 @@ local function apply_slash_damage_compare(ele, items_fn, obj, sec, obj_b)
 		ele.comp:Show(false)
 		return false
 	end
-	-- No shared colors: still emit placeholders in current-weapon order.
+	-- No shared matches: still emit placeholders in current-weapon order.
 	if not any_shared then
 		local parts = {}
 		for i = 1, #diffs do
