@@ -89,13 +89,13 @@
 		<text>Header text only; does not change the damage math.</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_names">
-		<text>Armor tier names [Min, Lgt, Lgt+, Mid, ...]</text>
+		<text>Nice armor tier names [Min, Lgt, Lgt+, Mid, ... Max]</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_raw">
-		<text>Raw NPC armor values [0.011, 0.075, ...]</text>
+		<text>NPC raw armor values [0.011, 0.075, ... 0.650]</text>
 	</string>
 	<string id="dorn_weapon_tooltip_main_column_headers_lst_raw100">
-		<text>Integer (raw armor x100 rounded down) [1, 7, 10, ...]</text>
+		<text>BRC approximates (raw armor x100 rounded down) [1, 7, ... 65]</text>
 	</string>
 	<string id="ui_mcm_dorn_weapon_tooltip_color_scale_from">
 		<text>Colors scale from</text>
@@ -304,7 +304,7 @@
 			\n - Per-ammo values are colored like the damage-table Type labels.
 			\n
 			\n%c[d_green]Bullet Drop%c[default]
-			\n - How far a bullet drops over the MCM Dispersion/Drop range (default 200m; slider 100-2000).
+			\n - How far a bullet drops over the MCM Dispersion/Drop range (default 200m).
 			\n - With Stat List silencer MCM on and a silencer attached: multiplies muzzle velocity by bullet_speed_k (Boomsticks cans are often ~0.9; some lower), so drop increases with a suppressor.
 			\n
 			\n%c[d_green]Barrel Wear%c[default]
@@ -314,7 +314,7 @@
 			\n - weapon_degradation by economy: Tourist 0.5, Scavenger 0.75, Survivalist 1.0. Silencers do not change this.
 			\n
 			\n%c[d_green]Burst Size%c[default]
-			\n - How many consecutive ADS shots (at max fire rate) it takes for the camera to climb to the MCM Burst Size climb target (default 3 degrees; slider 1-10, step 0.5).
+			\n - How many consecutive ADS shots (at max fire rate) it takes for the camera to climb to the MCM Burst Size climb target (default 3 degrees).
 			\n - With Stat List silencer MCM on and a silencer attached: multiplies ADS cam kick by zoom_cam_dispersion_k (and inc _k when present), so Burst Size goes up when the suppressor softens recoil.
 		</text>
 	</string>
