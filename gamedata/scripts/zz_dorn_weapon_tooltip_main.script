@@ -121,6 +121,28 @@ local K_AP_COMBAT_SCALE = 10  -- CQC: ini k_ap * 10 for combat
 local AP_TAIL = 0.80          -- CQC post-grouping AP adjustment
 local SILENCER_BOOST = 1.07
 local SNIPER_AP_BONUS = 0.05  -- CQC: added to raw k_ap for listed snipers
+-- CQC: armor chips by combat_ap x 0.60; soft-pen if ap still beats chipped armor.
+local ARMOR_CHIP_FRAC = 0.60
+-- CQC residual (hard fail): 0.0025 x power x hit_frac x random(25,100) / hp_ammo_mult.
+-- Tooltip uses the mid random (62.5).
+local HARD_FAIL_SCALE = 0.0025 * 62.5
+-- CQC hp_rounds table (named hp_ammo_mult here): divisor on hard-fail residual.
+local HP_AMMO_MULT = {
+	["ammo_357_hp_mag"] = 2,
+	["ammo_9x18_pmm"] = 2,
+	["ammo_9x19_pbp"] = 2,
+	["ammo_7.62x25_p"] = 1.75,
+	["ammo_11.43x23_hydro"] = 2.7,
+	["ammo_5.45x39_ep"] = 1.45,
+	["ammo_5.56x45_ss190"] = 1.33,
+	["ammo_12x76_zhekan"] = 3.5,
+	["ammo_12x76_dart"] = 1.5,
+	["ammo_12x70_buck"] = 3,
+	["ammo_23x75_shrapnel"] = 2,
+	["ammo_23x75_barrikada"] = 3.5,
+	["ammo_20x70_buck"] = 2,
+	["ammo_338_federal"] = 10,
+}
 -- CQC integrated_silencer table (parent_section keys).
 local INTEGRATED_SILENCER = {
 	["wpn_dvl10_m1"] = true,
@@ -1490,9 +1512,21 @@ end
 local function effective_dmg(hit_power, k_hit, k_ap_ltx, air_res, armor, ap_scale, hit_frac, bone_mult, dist, pellet_mult, barrel, ammo_sec, silencer)
 	local ap = combat_ap(k_ap_ltx, air_res, dist, ap_scale, barrel, silencer)
 	local power = base_power(hit_power, k_hit, air_res, dist, bone_mult, ap_scale, pellet_mult, barrel, ammo_sec, silencer)
-	-- Armor 0 (bare head): always full power; never apply chip hit_frac.
-	local penetrated = (armor <= 0) or (ap >= armor)
-	local dmg = penetrated and power or (power * hit_frac)
+	local dmg
+	-- Armor 0 (bare head): always full power.
+	if armor <= 0 or ap >= armor then
+		dmg = power
+	else
+		-- Fresh armor chip: new_armor = armor - ap x 0.60. Soft-pen if ap > new_armor
+		-- => ap > armor / (1 + 0.60). Else hard-fail residual (+ HP divisor when listed).
+		local soft_pen_ap = armor / (1 + ARMOR_CHIP_FRAC)
+		if ap > soft_pen_ap then
+			dmg = power * hit_frac
+		else
+			local hp_ammo_mult = HP_AMMO_MULT[ammo_sec] or 1
+			dmg = HARD_FAIL_SCALE * power * hit_frac / hp_ammo_mult
+		end
+	end
 	return {
 		dmg = dmg * DAMAGE_SCALE,
 	}

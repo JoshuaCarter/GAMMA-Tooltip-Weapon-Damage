@@ -338,8 +338,10 @@
 			\n - %c[d_blue]power%c[default] = (hit_power / %c[d_blue]range_factor%c[default]) x ammo_k_hit x %c[d_blue]bone_mult%c[default] x tier_ap_scale x 1.1 x %c[d_blue]pellets%c[default] x barrel_cond x difficulty x npc_ammo_mult x %c[d_blue]silencer%c[default] x 100
 			\n - %c[d_blue]combat_ap%c[default] = ((k_ap + sniper_bonus) x 10) x tier_ap_scale x barrel_cond / range_factor x 0.80 x difficulty x %c[d_blue]silencer%c[default]
 			\n - %c[d_blue]sniper_bonus%c[default] = 0.05 for CQC sniper parent sections (L96, SV-98, Mosin, Rem 700, DVL, …); else 0. AP column still shows ammo-card k_ap x 1000.
+			\n - %c[d_blue]hp_ammo_mult%c[default] = 1 except for specific ammos which can be up to 10. Higher = worse damage (see hp_ammo_mult section below).
 			\n - IF %c[d_blue]combat_ap%c[default] &gt;= armor OR armor is 0 THEN  %c[d_red]damage%c[default] = %c[d_blue]power%c[default]
-			\n - ELSE %c[d_red]damage%c[default] = %c[d_blue]power%c[default] x avg_hit_fraction END
+			\n - ELSE IF %c[d_blue]combat_ap%c[default] &gt; armor / 1.6 THEN  %c[d_red]damage%c[default] = %c[d_blue]power%c[default] x avg_hit_fraction
+			\n - ELSE %c[d_red]damage%c[default] = 0.0025 x %c[d_blue]power%c[default] x avg_hit_fraction x 62.5 / %c[d_blue]hp_ammo_mult%c[default]
 			\n - AP column shows ini k_ap x 1000 (same as the ammo info card); combat uses k_ap x 10.
 		</text>
 	</string>
@@ -402,23 +404,48 @@
 			\n - There are no faction damage resists in live grok_bo.
 			\n
 			\n%c[d_green]mut_mult%c[default] Mutant multiplier (species_mult / weak_spot_mult):
-			\n - %c[d_blue]Pseudogiant%c[default]: 0.85 / 2.0
 			\n - %c[d_blue]Fracture%c[default]: 0.60 / 2.2
-			\n - %c[d_blue]Zombie%c[default]: 0.80 / 2.0
 			\n - %c[d_blue]Chimera%c[default]: 0.75 / 2.0
+			\n - %c[d_blue]Zombie%c[default]: 0.80 / 2.0
+			\n - %c[d_blue]Pseudogiant%c[default]: 0.85 / 2.0
 			\n - %c[d_blue]Bloodsucker%c[default]: 0.85 / 1.4
 			\n - %c[d_blue]Psysucker%c[default]: 0.85 / 1.6
 			\n - %c[d_blue]Lurker%c[default]: 0.85 / 1.5
 			\n - %c[d_blue]Boar%c[default]: 0.95 / none
 			\n - %c[d_blue]Flesh%c[default]: 0.95 / 1.3
+			\n - %c[d_blue]Dog%c[default]: 1.0 / none
+			\n - %c[d_blue]Pseudodog%c[default]: 1.0 / none
+			\n - %c[d_blue]Cat%c[default]: 1.0 / none
+			\n - %c[d_blue]Burer%c[default]: 1.0 / none
+			\n - %c[d_blue]Controller%c[default]: 1.0 / none
+			\n - %c[d_blue]Poltergeist%c[default]: 1.0 / none
+			\n - %c[d_blue]Tushkano%c[default]: 1.0 / none
+			\n - %c[d_blue]Crow%c[default]: 1.0 / none
+			\n - %c[d_blue]Rat%c[default]: 1.0 / none
+			\n - %c[d_blue]Karlik%c[default]: 1.0 / none
+			\n - %c[d_blue]Bibliotekar%c[default]: 1.0 / none
+			\n - %c[d_blue]Rotan%c[default]: 1.0 / none
+			\n - %c[d_blue]Borya%c[default]: 1.0 / none
 			\n - %c[d_blue]Snork%c[default]: 1.10 / 2.0
-			\n - %c[d_blue]Other mutants%c[default]: 1.0 / none
 			\n
 			\n%c[d_green]mut_ammo_mult%c[default] Mutant ammo damage multiplier:
 			\n - 1.75: 7.62x25 LRNPC / P
 			\n - 1.0: 23x75 shrapnel / barrikada, 12x76 zhekan, 9x19 PBP, 9x18 PMM, 5.45 EP, 5.56 SS190, 7.62x25 Pst, .357 Magnum HP, .45 Hydro / FMJ
 			\n - 0.90: Buckshot 12x70 / 20x70
 			\n - 0.85: Everything else
+			\n
+			\n%c[d_green]hp_ammo_mult%c[default] Hard-fail residual divisor (CQC hp_rounds; stalker armor only):
+			\n Divides residual damage when combat_ap is too low to soft-pen after one armor chip. Soft pens and full pens ignore this. Higher = worse non-pen chip damage.
+			\n - 10: .338 Federal
+			\n - 3.5: 12x76 Zhekan, 23x75 Barrikada
+			\n - 3: Buckshot 12x70
+			\n - 2.7: .45 Hydro
+			\n - 2: .357 Magnum HP, 9x18 PMM, 9x19 PBP, 23x75 Shrapnel, Buckshot 20x70
+			\n - 1.75: 7.62x25 P
+			\n - 1.5: 12x76 Dart
+			\n - 1.45: 5.45 EP
+			\n - 1.33: 5.56 SS190
+			\n - 1.0: Everything else (FMJ / AP / Pst / …)
 			\n
 			\n%c[d_green]Silencers%c[default]:
 			\n - Live CQC multiplies stalker combat damage and AP x1.07 when a silencer is attached (or the weapon has an integrated suppressor).
